@@ -3,14 +3,17 @@ import { formatNumber } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
 import { PillTabs, SubFilter, TabKey } from "@/components/Tabs";
 import { MapSuara, MapRelawan, MapKomparasiA, MapKomparasiB } from "@/components/Maps";
-import { TPS_SEED, RELAWAN_SEED, KOORDINATORS, KECAMATAN, type TPS, type Relawan, type Koordinator } from "@/lib/mockData";
+import { TPS_SEED, RELAWAN_SEED, KOORDINATORS, KECAMATAN, KELURAHAN_BY_KEC, KELURAHAN_CENTER, getKelurahanCenter, type TPS, type Relawan, type Koordinator } from "@/lib/mockData";
 import { SEGMENTASI, segBySlug } from "@/lib/segmentasi";
-import { blankSpot, korelasiByKecamatan } from "@/lib/geo";
+import { blankSpot, korelasiByKecamatan, rekapByKecamatan, rekapByKelurahan } from "@/lib/geo";
+import { TARGET_RELAWAN_DEFAULT, TARGET_KOOR_DEFAULT, calcProgress, formatPct } from "@/lib/target";
+import ChatBot from "@/components/ChatBot";
 
 export default function Home() {
   const [tab, setTab] = useState<TabKey>("peta");
   const [mode, setMode] = useState<"total"|"sr"|"pks">("sr");
   const [kec, setKec] = useState<string>("Semua kecamatan");
+  const [kel, setKel] = useState<string>("Semua kelurahan");
   const [mapView, setMapView] = useState<"suara"|"relawan"|"komparasi-a"|"komparasi-b">("relawan");
   const [tpsList, setTpsList] = useState<TPS[]>(()=> [...TPS_SEED]);
   const [relawans, setRelawans] = useState<Relawan[]>(()=> [...RELAWAN_SEED]);
@@ -26,12 +29,17 @@ export default function Home() {
   const [showTambahRelawan, setShowTambahRelawan] = useState(false);
   const [showTambahKoor, setShowTambahKoor] = useState(false);
   const [formRelawan, setFormRelawan] = useState({nama:"", wa:"", alamat:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", rtRw:"01/02", lat:"-6.9837", lng:"110.4197", segmentasi:"ojol", koordinatorId:"k1"});
-  const [formKoor, setFormKoor] = useState({nama:"", wa:"", kelurahan:"", kecamatan:"Semarang Tengah"});
+  const [formKoor, setFormKoor] = useState({nama:"", wa:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah"});
   const [showErf, setShowErf] = useState(false);
   const [theme, setTheme] = useState<"light"|"dark">("light");
   const [segOpen, setSegOpen] = useState(true);
   const [perbandinganOpen, setPerbandinganOpen] = useState(false);
   const [laporanOpen, setLaporanOpen] = useState(false);
+  const [targetRelawan, setTargetRelawan] = useState<number>(TARGET_RELAWAN_DEFAULT);
+  const [targetKoor, setTargetKoor] = useState<number>(TARGET_KOOR_DEFAULT);
+  const [showTargetModal, setShowTargetModal] = useState(false);
+  const [draftTargetRelawan, setDraftTargetRelawan] = useState(String(TARGET_RELAWAN_DEFAULT));
+  const [draftTargetKoor, setDraftTargetKoor] = useState(String(TARGET_KOOR_DEFAULT));
 
   useEffect(()=>{
     const saved = (typeof window !== "undefined" ? localStorage.getItem("sr-theme") : null) as "light"|"dark"|null;
@@ -42,12 +50,38 @@ export default function Home() {
   },[]);
   useEffect(()=>{ document.documentElement.classList.toggle("dark", theme==="dark"); try{ localStorage.setItem("sr-theme", theme); }catch{} },[theme]);
   function toggleTheme(){ setTheme(prev => prev==="dark" ? "light" : "dark"); }
+  // target: load sekali di mount (SSR aman, tidak pakai persist-effect agar tidak overwrite di StrictMode)
+  useEffect(()=>{
+    try{
+      const r = Number(localStorage.getItem("sr-target-relawan"));
+      const k = Number(localStorage.getItem("sr-target-koor"));
+      if(Number.isFinite(r) && r>0) setTargetRelawan(Math.floor(r));
+      if(Number.isFinite(k) && k>0) setTargetKoor(Math.floor(k));
+    }catch{}
+  },[]);
+  function persistTarget(nextRelawan: number, nextKoor: number){
+    try{ localStorage.setItem("sr-target-relawan", String(nextRelawan)); }catch{}
+    try{ localStorage.setItem("sr-target-koor", String(nextKoor)); }catch{}
+  }
+
+  // kelurahan bertingkat: opsi ikut kec, reset jika tidak valid
+  const kelurahanOptions = useMemo(()=>{
+    if(kec==="Semua kecamatan") return ["Semua kelurahan"];
+    return ["Semua kelurahan", ...(KELURAHAN_BY_KEC[kec] ?? [])];
+  },[kec]);
+  useEffect(()=>{
+    if(kec==="Semua kecamatan" && kel!=="Semua kelurahan") setKel("Semua kelurahan");
+    else if(kec!=="Semua kecamatan" && kel!=="Semua kelurahan" && !(KELURAHAN_BY_KEC[kec] ?? []).includes(kel)) setKel("Semua kelurahan");
+  },[kec]); // eslint-disable-line react-hooks/exhaustive-deps
+  function handleKecChange(v: string){ setKec(v); setKel("Semua kelurahan"); }
 
   const stats = useMemo(()=>{
     const totalSR = tpsList.reduce((a,b)=>a+b.suaraSitiRoika,0);
     const totalPKS = tpsList.reduce((a,b)=>a+b.suaraPKS,0);
     return { k: koors.filter(k=>k.status==="aktif").length, r: relawans.filter(r=>r.status==="aktif").length, t: tpsList.length, sr: totalSR, pks: totalPKS };
   },[koors, relawans, tpsList]);
+  const progRelawan = useMemo(()=> calcProgress(stats.r, targetRelawan), [stats.r, targetRelawan]);
+  const progKoor = useMemo(()=> calcProgress(stats.k, targetKoor), [stats.k, targetKoor]);
 
   const filteredRelawans = useMemo(()=>{
     return relawans.filter(r=>{
@@ -59,18 +93,27 @@ export default function Home() {
     });
   },[relawans, filterSeg, filterKoor, searchRelawan, searchTop]);
   const filteredRelawansForMap = useMemo(()=>{
-    return filteredRelawans.filter(r=> kec==="Semua kecamatan" || r.kecamatan===kec);
-  },[filteredRelawans, kec]);
+    return filteredRelawans.filter(r=>{
+      if(kec!=="Semua kecamatan" && r.kecamatan!==kec) return false;
+      if(kel!=="Semua kelurahan" && r.kelurahan!==kel) return false;
+      return true;
+    });
+  },[filteredRelawans, kec, kel]);
 
   const filteredTps = useMemo(()=>{
     return tpsList.filter(t=>{
       if(kec!=="Semua kecamatan" && t.kecamatan!==kec) return false;
+      if(kel!=="Semua kelurahan" && t.kelurahan!==kel) return false;
       if(searchTps && !`${t.noTps} ${t.kelurahan} ${t.kecamatan}`.toLowerCase().includes(searchTps.toLowerCase())) return false;
       return true;
     });
-  },[tpsList, kec, searchTps]);
+  },[tpsList, kec, kel, searchTps]);
 
-  const blanks = useMemo(()=> blankSpot(tpsList.filter(t=> kec==="Semua kecamatan"||t.kecamatan===kec), relawans, radius), [tpsList, relawans, radius, kec]);
+  const blanks = useMemo(()=> blankSpot(tpsList.filter(t=>{
+    if(kec!=="Semua kecamatan" && t.kecamatan!==kec) return false;
+    if(kel!=="Semua kelurahan" && t.kelurahan!==kel) return false;
+    return true;
+  }), relawans, radius), [tpsList, relawans, radius, kec, kel]);
   const korelasi = useMemo(()=> korelasiByKecamatan(tpsList, relawans), [tpsList, relawans]);
 
   const segCounts = useMemo(()=>{
@@ -84,6 +127,132 @@ export default function Home() {
     return [...koors].map(k=> ({...k, cnt: relawans.filter(r=>r.koordinatorId===k.id && r.status==="aktif").length}))
       .sort((a,b)=> b.cnt-a.cnt).slice(0,5);
   },[koors, relawans]);
+
+  // Laporan — rekap yang ikut filter kec/kel + search
+  const [laporanKec, setLaporanKec] = useState<string>("Semua kecamatan");
+  const [laporanKel, setLaporanKel] = useState<string>("Semua kelurahan");
+  const [laporanSort, setLaporanSort] = useState<"kelurahan"|"relawan"|"tps"|"dpt">("kelurahan");
+  const [laporanSearch, setLaporanSearch] = useState("");
+  const laporanKelOptions = useMemo(()=>{
+    if(laporanKec==="Semua kecamatan") return ["Semua kelurahan"];
+    return ["Semua kelurahan", ...(KELURAHAN_BY_KEC[laporanKec] ?? [])];
+  },[laporanKec]);
+  useEffect(()=>{
+    if(laporanKec==="Semua kecamatan" && laporanKel!=="Semua kelurahan") setLaporanKel("Semua kelurahan");
+    else if(laporanKec!=="Semua kecamatan" && laporanKel!=="Semua kelurahan" && !(KELURAHAN_BY_KEC[laporanKec] ?? []).includes(laporanKel)) setLaporanKel("Semua kelurahan");
+  },[laporanKec]); // eslint-disable-line react-hooks/exhaustive-deps
+  function handleLaporanKecChange(v:string){ setLaporanKec(v); setLaporanKel("Semua kelurahan"); }
+  const tpsForLaporan = useMemo(()=>{
+    return tpsList.filter(t=>{
+      if(laporanKec!=="Semua kecamatan" && t.kecamatan!==laporanKec) return false;
+      if(laporanKel!=="Semua kelurahan" && t.kelurahan!==laporanKel) return false;
+      return true;
+    });
+  },[tpsList, laporanKec, laporanKel]);
+  const relawanForLaporan = useMemo(()=>{
+    return relawans.filter(r=>{
+      if(r.status!=="aktif") return false;
+      if(laporanKec!=="Semua kecamatan" && r.kecamatan!==laporanKec) return false;
+      if(laporanKel!=="Semua kelurahan" && r.kelurahan!==laporanKel) return false;
+      return true;
+    });
+  },[relawans, laporanKec, laporanKel]);
+  const koorForLaporan = useMemo(()=>{
+    return koors.filter(k=>{
+      if(k.status!=="aktif") return false;
+      if(laporanKec!=="Semua kecamatan" && k.kecamatan!==laporanKec) return false;
+      if(laporanKel!=="Semua kelurahan" && k.kelurahan!==laporanKel) return false;
+      return true;
+    });
+  },[koors, laporanKec, laporanKel]);
+  const rekapKec = useMemo(()=> rekapByKecamatan(tpsForLaporan, relawanForLaporan, koorForLaporan), [tpsForLaporan, relawanForLaporan, koorForLaporan]);
+  const rekapKelRaw = useMemo(()=> rekapByKelurahan(tpsForLaporan, relawanForLaporan), [tpsForLaporan, relawanForLaporan]);
+  const rekapKel = useMemo(()=>{
+    let arr = [...rekapKelRaw];
+    if(laporanSearch){
+      const q=laporanSearch.toLowerCase();
+      arr = arr.filter(r=> `${r.kecamatan} ${r.kelurahan}`.toLowerCase().includes(q));
+    }
+    if(laporanSort==="relawan") arr.sort((a,b)=> b.relawan - a.relawan || a.kelurahan.localeCompare(b.kelurahan));
+    else if(laporanSort==="tps") arr.sort((a,b)=> b.tpsCount - a.tpsCount || a.kelurahan.localeCompare(b.kelurahan));
+    else if(laporanSort==="dpt") arr.sort((a,b)=> b.dpt - a.dpt || a.kelurahan.localeCompare(b.kelurahan));
+    else arr.sort((a,b)=> a.kecamatan.localeCompare(b.kecamatan) || a.kelurahan.localeCompare(b.kelurahan));
+    return arr;
+  },[rekapKelRaw, laporanSearch, laporanSort]);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  async function exportLaporanPdf(){
+    setExportingPdf(true);
+    try{
+      const jsPDFmod = await import("jspdf");
+      const autoTableMod: any = await import("jspdf-autotable");
+      const autoTable = autoTableMod.default ?? autoTableMod;
+      const JsPDF = (jsPDFmod as any).jsPDF ?? (jsPDFmod as any).default ?? jsPDFmod;
+      const doc = new JsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const now = new Date();
+      const tgl = now.toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" });
+      const jam = now.toLocaleTimeString("id-ID", { hour:"2-digit", minute:"2-digit" });
+      const scope = laporanKec==="Semua kecamatan" ? "Dapil 1 — Semua kecamatan (34 kelurahan)" : laporanKel==="Semua kelurahan" ? `${laporanKec} — ${rekapKel.length} kelurahan` : `${laporanKec} — ${laporanKel}`;
+      // header
+      doc.setFontSize(13); doc.setFont("helvetica","bold");
+      doc.text("Rekap Laporan & Analitik — Relawan Siti Roika", 14, 14);
+      doc.setFontSize(8); doc.setFont("helvetica","normal"); doc.setTextColor(100);
+      doc.text(`Dapil 1 Kota Semarang · ${scope} · ${tgl} ${jam} WIB · Total: ${stats.t} TPS · ${stats.r} relawan · ${stats.k} koordinator`, 14, 19);
+      doc.setFontSize(7); doc.text(`Filter: ${laporanKec} / ${laporanKel} · Urut: ${laporanSort} · Cari: ${laporanSearch || "-"}`, 14, 23);
+      // ringkasan 4 kartu sebagai teks
+      const sum = rekapKec.reduce((a,c)=>({ tps:a.tps+c.tpsCount, dpt:a.dpt+c.dpt, sah:a.sah+c.suaraSah, sr:a.sr+c.suaraSR, pks:a.pks+c.suaraPKS, rel:a.rel+c.relawan, koor:a.koor+c.koordinator }), {tps:0,dpt:0,sah:0,sr:0,pks:0,rel:0,koor:0});
+      doc.setFontSize(8); doc.setTextColor(30); doc.setFont("helvetica","bold");
+      doc.text(`Ringkasan filter: ${sum.tps} TPS · ${sum.dpt.toLocaleString("id-ID")} DPT · ${sum.sah.toLocaleString("id-ID")} sah · SR ${sum.sr.toLocaleString("id-ID")} · PKS ${sum.pks.toLocaleString("id-ID")} · ${sum.rel} relawan · ${sum.koor} koordinator`, 14, 27);
+      let y = 31;
+      // Tabel 1: Rekap per Kecamatan
+      doc.setFontSize(10); doc.setFont("helvetica","bold"); doc.setTextColor(15);
+      doc.text("Rekap per Kecamatan", 14, y); y+=2;
+      autoTable(doc, {
+        startY: y,
+        head: [["Kecamatan","Kelurahan","TPS","DPT","Suara Sah","SR","PKS","Relawan","Koordinator"]],
+        body: rekapKec.map(r=> [r.kecamatan, String(r.kelCount), String(r.tpsCount), r.dpt.toLocaleString("id-ID"), r.suaraSah.toLocaleString("id-ID"), r.suaraSR.toLocaleString("id-ID"), r.suaraPKS.toLocaleString("id-ID"), String(r.relawan), String(r.koordinator)]),
+        foot: rekapKec.length ? [[{content:"TOTAL", colSpan:2, styles:{halign:"right", fontStyle:"bold"}}, String(sum.tps), sum.dpt.toLocaleString("id-ID"), sum.sah.toLocaleString("id-ID"), sum.sr.toLocaleString("id-ID"), sum.pks.toLocaleString("id-ID"), String(sum.rel), String(sum.koor)]] : undefined,
+        theme: "grid",
+        styles: { fontSize: 7, cellPadding: 1.5, lineColor: [226,232,240] },
+        headStyles: { fillColor: [37,99,235], textColor: 255, fontStyle:"bold" },
+        footStyles: { fillColor: [241,245,249], textColor: 15, fontStyle:"bold" },
+        columnStyles: { 2:{halign:"right"},3:{halign:"right"},4:{halign:"right"},5:{halign:"right"},6:{halign:"right"},7:{halign:"right"},8:{halign:"right"} },
+        margin: { left:14, right:14 },
+        didDrawPage: (data:any)=>{ y = data.cursor?.y ?? y; }
+      });
+      // Tabel 2: Rekap per Kelurahan (halaman baru jika perlu)
+      const afterKecY: number = (doc as any).lastAutoTable?.finalY ?? y+10;
+      let y2 = afterKecY + 6;
+      if(y2 > 180){ doc.addPage(); y2 = 14; }
+      doc.setFontSize(10); doc.setFont("helvetica","bold"); doc.setTextColor(15);
+      doc.text(`Rekap per Kelurahan — ${rekapKel.length} baris${laporanSearch ? ` (cari: "${laporanSearch}")` : ""}`, 14, y2); y2+=2;
+      autoTable(doc, {
+        startY: y2,
+        head: [["#","Kecamatan","Kelurahan","TPS","DPT","Sah","SR","PKS","Relawan"]],
+        body: rekapKel.map((r,i)=> [String(i+1), r.kecamatan, r.kelurahan, String(r.tpsCount), r.dpt.toLocaleString("id-ID"), r.suaraSah.toLocaleString("id-ID"), r.suaraSR.toLocaleString("id-ID"), r.suaraPKS.toLocaleString("id-ID"), String(r.relawan)]),
+        theme: "grid",
+        styles: { fontSize: 6.5, cellPadding: 1.2, lineColor: [226,232,240] },
+        headStyles: { fillColor: [14,165,233], textColor: 255, fontStyle:"bold" },
+        columnStyles: { 0:{halign:"right"},3:{halign:"right"},4:{halign:"right"},5:{halign:"right"},6:{halign:"right"},7:{halign:"right"},8:{halign:"right"} },
+        margin: { left:14, right:14 },
+      });
+      const pages: number = (doc as any).internal.getNumberOfPages();
+      for(let i=1;i<=pages;i++){ doc.setPage(i); doc.setFontSize(6); doc.setTextColor(148); doc.setFont("helvetica","normal"); doc.text(`Relawan SR — Dapil 1 Kota Semarang · Dicetak ${tgl} ${jam} · Hal ${i}/${pages}`, 14, 200); }
+      doc.save(`Laporan-Dapil1-${scope.replace(/[^a-zA-Z0-9]+/g,"-")}-${now.toISOString().slice(0,10)}.pdf`);
+    }catch(e:any){ alert("Gagal export PDF: "+(e?.message||e)); }
+    finally{ setExportingPdf(false); }
+  }
+  function exportRekapCsv(){
+    const headersKel = ["kecamatan","kelurahan","tps","dpt","suara_sah","suara_sr","suara_pks","relawan"];
+    const rowsKel = rekapKel.map(r=> ({kecamatan:r.kecamatan, kelurahan:r.kelurahan, tps:r.tpsCount, dpt:r.dpt, suara_sah:r.suaraSah, suara_sr:r.suaraSR, suara_pks:r.suaraPKS, relawan:r.relawan}));
+    const headersKec = ["kecamatan","kelurahan","tps","dpt","suara_sah","suara_sr","suara_pks","relawan","koordinator"];
+    const rowsKec = rekapKec.map(r=> ({kecamatan:r.kecamatan, kelurahan:r.kelCount, tps:r.tpsCount, dpt:r.dpt, suara_sah:r.suaraSah, suara_sr:r.suaraSR, suara_pks:r.suaraPKS, relawan:r.relawan, koordinator:r.koordinator}));
+    // gabung: header + baris kec, baris kosong, header kel, baris kel
+    const csvKec = [headersKec.join(","), ...rowsKec.map(r=> headersKec.map(h=> `"${String((r as any)[h]??"").replace(/"/g,'""')}"`).join(","))].join("\n");
+    const csvKel = [headersKel.join(","), ...rowsKel.map(r=> headersKel.map(h=> `"${String((r as any)[h]??"").replace(/"/g,'""')}"`).join(","))].join("\n");
+    const full = `# Rekap per Kecamatan — ${laporanKec} / ${laporanKel}\n${csvKec}\n\n# Rekap per Kelurahan — ${rekapKel.length} baris\n${csvKel}`;
+    const blob=new Blob([full],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=`rekap-dapil1-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
 
   async function handleImportTPS(e: React.ChangeEvent<HTMLInputElement>){
     const file = e.target.files?.[0]; if(!file) return;
@@ -166,11 +335,27 @@ export default function Home() {
 
   function handleAddRelawan(){
     if(!formRelawan.nama || !formRelawan.wa) return alert("Nama & WA wajib");
+    const kecSet = new Set(KECAMATAN.slice(1) as string[]);
+    if(!kecSet.has(formRelawan.kecamatan as any)) return alert("Kecamatan tidak valid");
+    const kels = KELURAHAN_BY_KEC[formRelawan.kecamatan] ?? [];
+    if(!kels.includes(formRelawan.kelurahan)) return alert(`Kelurahan tidak sesuai ${formRelawan.kecamatan}. Pilih dari dropdown kelurahan.`);
+    // alamat bebas, kelurahan dari dropdown bertingkat — titik peta ikut kelurahan
+    let lat = Number(formRelawan.lat), lng = Number(formRelawan.lng);
+    const latEmpty = !String(formRelawan.lat).trim(), lngEmpty = !String(formRelawan.lng).trim();
+    if(latEmpty || lngEmpty || !Number.isFinite(lat) || !Number.isFinite(lng)){
+      const c = getKelurahanCenter(formRelawan.kelurahan, formRelawan.kecamatan);
+      // jitter kecil agar tidak numpuk jika banyak di kelurahan sama
+      const jitter = () => (Math.random()-0.5)*0.006; // ±0.003°
+      if(latEmpty || !Number.isFinite(lat)) lat = c.lat + jitter();
+      if(lngEmpty || !Number.isFinite(lng)) lng = c.lng + jitter();
+    }
+    if(!Number.isFinite(lat) || lat < -11 || lat > 6) return alert("Lat tidak valid (-11..6) atau kosong — isi lat atau pilih kelurahan lain.");
+    if(!Number.isFinite(lng) || lng < 95 || lng > 141) return alert("Lng tidak valid (95..141) atau kosong — isi lng atau pilih kelurahan lain.");
     const ko = koors.find(k=>k.id===formRelawan.koordinatorId) ?? koors[0];
     const r: Relawan = {
       id:`rel-${Date.now()}`, nama:formRelawan.nama, wa:formRelawan.wa.replace(/\D/g,""), alamat:formRelawan.alamat,
       kelurahan:formRelawan.kelurahan, kecamatan:formRelawan.kecamatan, rtRw: formRelawan.rtRw,
-      lat: Number(formRelawan.lat), lng: Number(formRelawan.lng),
+      lat, lng,
       segmentasi: formRelawan.segmentasi, koordinatorId: ko.id, koordinatorNama: ko.nama, status:"aktif"
     };
     setRelawans(prev=>[r, ...prev]);
@@ -178,7 +363,12 @@ export default function Home() {
   }
   function handleAddKoor(){
     if(!formKoor.nama || !formKoor.wa) return alert("Nama & WA wajib");
-    const k: Koordinator = {id:`k-${Date.now()}`, nama:formKoor.nama, wa:formKoor.wa, kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, lat:-6.98, lng:110.42, status:"aktif", jmlRelawan:0};
+    const kecSet = new Set(KECAMATAN.slice(1) as string[]);
+    if(!kecSet.has(formKoor.kecamatan as any)) return alert("Kecamatan tidak valid");
+    const kels = KELURAHAN_BY_KEC[formKoor.kecamatan] ?? [];
+    if(!kels.includes(formKoor.kelurahan)) return alert(`Kelurahan tidak sesuai ${formKoor.kecamatan}. Pilih dari dropdown kelurahan.`);
+    const c = getKelurahanCenter(formKoor.kelurahan, formKoor.kecamatan);
+    const k: Koordinator = {id:`k-${Date.now()}`, nama:formKoor.nama, wa:formKoor.wa, kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, lat:c.lat, lng:c.lng, status:"aktif", jmlRelawan:0};
     setKoors(prev=>[...prev, k]);
     setShowTambahKoor(false);
   }
@@ -259,14 +449,15 @@ export default function Home() {
           </div>
 
           <div>
-            <button onClick={()=> setLaporanOpen(v=>!v)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 text-left">
+            <button onClick={()=> setLaporanOpen(v=>!v)} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50"}`}>
               <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">📊</span>
               <span className="flex-1">Laporan & Analitik</span>
               <span className={`text-[10px] transition ${laporanOpen?"rotate-180":""}`}>▾</span>
             </button>
             {laporanOpen && (
               <div className="ml-4 pl-4 border-l border-[#E2E8F0] dark:border-[#1E293B] space-y-0.5 mt-0.5">
-                <button onClick={()=> setTab("peta")} className="w-full text-left px-3 py-1.5 rounded-lg text-[12px] text-[#64748B]">• Rekap Kecamatan</button>
+                <button onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B]"}`}>• Rekap Kecamatan</button>
+                <button onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B]"}`}>• Rekap Kelurahan</button>
                 <button onClick={()=> setTab("data-tps")} className="w-full text-left px-3 py-1.5 rounded-lg text-[12px] text-[#64748B]">• Data TPS</button>
               </div>
             )}
@@ -330,29 +521,88 @@ export default function Home() {
                   <h1 className="text-[18px] font-extrabold text-[#0F172A] dark:text-white leading-none">Dashboard</h1>
                   <p className="text-[12px] text-[#64748B] mt-1">Ringkasan data relawan dan peta sebaran di Dapil 1 Kota Semarang</p>
                 </div>
-                <div className="flex items-center gap-2 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-3 py-1.5 text-[12px] text-[#334155] dark:text-[#CBD5E1]">
-                  <span className="text-[#94A3AF]">📅</span> 1 Jan 2025 - 31 Des 2025 <span className="text-[#94A3AF]">▾</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-3 py-1.5 text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A] shadow-sm">⚙ Atur Target</button>
+                  <div className="flex items-center gap-2 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-3 py-1.5 text-[12px] text-[#334155] dark:text-[#CBD5E1]">
+                    <span className="text-[#94A3AF]">📅</span> 1 Jan 2025 - 31 Des 2025 <span className="text-[#94A3AF]">▾</span>
+                  </div>
                 </div>
               </div>
 
-              {/* KPI 4 */}
-              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-                {[
-                  { label:"Total Relawan", value: formatNumber(12458), delta:"+ 12% dari periode sebelumnya", icon:"👥", sub:true },
-                  { label:"Koordinator Relawan", value: "248", delta:"+ 8% dari periode sebelumnya", icon:"👤", sub:true },
-                  { label:"Jumlah Wilayah", value: "34", subLabel:"Dapil 1 · 34 Kelurahan · 3 Kec.", icon:"📍" },
-                  { label:"Segmentasi Relawan", value:"8", subLabel:"Kategori relawan", icon:"📊" },
-                ].map(c=>(
-                  <div key={c.label} className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 flex items-start gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                    <span className="w-10 h-10 rounded-xl bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[16px] shrink-0">{c.icon}</span>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-semibold text-[#64748B] leading-none">{c.label}</div>
-                      <div className="text-[20px] font-extrabold text-[#0F172A] dark:text-white leading-none mt-1.5">{c.label==="Total Relawan" ? formatNumber(stats.r) : c.value}</div>
-                      {c.delta && <div className="text-[10px] text-[#16A34A] font-medium mt-1">↗ {c.delta}</div>}
-                      {c.subLabel && <div className="text-[10px] text-[#94A3AF] mt-1">{c.subLabel}</div>}
+              {/* KPI — 2 kartu target + 2 info */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {/* Total Relawan — dengan target */}
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex flex-col">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex gap-3 min-w-0">
+                      <span className="w-10 h-10 rounded-xl bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[16px] shrink-0">👥</span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-[#64748B] leading-none">Total Relawan</div>
+                        <div className="flex items-baseline gap-1.5 flex-wrap mt-1.5 leading-none">
+                          <span className="text-[20px] font-extrabold text-[#0F172A] dark:text-white">{formatNumber(stats.r)}</span>
+                          <span className="text-[11px] font-semibold text-[#94A3AF]">/ {formatNumber(targetRelawan)}</span>
+                        </div>
+                        <div className="text-[10px] text-[#94A3AF] mt-0.5">target</div>
+                      </div>
                     </div>
+                    <span className="shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold" style={{ background: progRelawan.color+"14", color: progRelawan.color, borderColor: progRelawan.color+"30" }}>{formatPct(progRelawan.pct)}%</span>
                   </div>
-                ))}
+                  <div className="mt-3 h-2 rounded-full bg-[#F1F5F9] dark:bg-[#0F172A] overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progRelawan.pctClamped}%`, background: progRelawan.color }} />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[10px] gap-2">
+                    <span className="text-[#64748B] truncate">{progRelawan.remaining===0 ? "Target terpenuhi ✓" : `Sisa ${formatNumber(progRelawan.remaining)} lagi`}</span>
+                    <span className="font-bold shrink-0" style={{ color: progRelawan.color }}>{progRelawan.label}</span>
+                  </div>
+                  {progRelawan.pct >= 100 && <div className="mt-2 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1 text-center">🎉 Target relawan tercapai!</div>}
+                </div>
+
+                {/* Koordinator Relawan — dengan target */}
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex flex-col">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex gap-3 min-w-0">
+                      <span className="w-10 h-10 rounded-xl bg-[#FEF3C7] dark:bg-[#0F172A] border border-[#FDE68A] dark:border-[#334155] grid place-items-center text-[16px] shrink-0">👤</span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-[#64748B] leading-none">Koordinator Relawan</div>
+                        <div className="flex items-baseline gap-1.5 flex-wrap mt-1.5 leading-none">
+                          <span className="text-[20px] font-extrabold text-[#0F172A] dark:text-white">{formatNumber(stats.k)}</span>
+                          <span className="text-[11px] font-semibold text-[#94A3AF]">/ {formatNumber(targetKoor)}</span>
+                        </div>
+                        <div className="text-[10px] text-[#94A3AF] mt-0.5">target</div>
+                      </div>
+                    </div>
+                    <span className="shrink-0 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold" style={{ background: progKoor.color+"14", color: progKoor.color, borderColor: progKoor.color+"30" }}>{formatPct(progKoor.pct)}%</span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-[#F1F5F9] dark:bg-[#0F172A] overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progKoor.pctClamped}%`, background: progKoor.color }} />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[10px] gap-2">
+                    <span className="text-[#64748B] truncate">{progKoor.remaining===0 ? "Target terpenuhi ✓" : `Sisa ${formatNumber(progKoor.remaining)} lagi`}</span>
+                    <span className="font-bold shrink-0" style={{ color: progKoor.color }}>{progKoor.label}</span>
+                  </div>
+                  {progKoor.pct >= 100 && <div className="mt-2 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1 text-center">🎉 Target koordinator tercapai!</div>}
+                </div>
+
+                {/* Data TPS */}
+                <button onClick={()=> setTab("data-tps")} className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 flex items-start gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] text-left hover:border-[#93C5FD] dark:hover:border-[#60A5FA] transition">
+                  <span className="w-10 h-10 rounded-xl bg-[#ECFDF5] dark:bg-[#0F172A] border border-[#A7F3D0] dark:border-[#334155] grid place-items-center text-[16px] shrink-0">🗳️</span>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold text-[#64748B] leading-none">Data TPS</div>
+                    <div className="text-[20px] font-extrabold text-[#0F172A] dark:text-white leading-none mt-1.5">{formatNumber(stats.t)}</div>
+                    <div className="text-[10px] text-[#94A3AF] mt-1">{formatNumber(filteredTps.length)} tampil · 34 Kelurahan · Dapil 1</div>
+                    <div className="text-[10px] text-[#2563EB] font-semibold mt-1">Lihat Data TPS →</div>
+                  </div>
+                </button>
+
+                {/* Segmentasi */}
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 flex items-start gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                  <span className="w-10 h-10 rounded-xl bg-[#F5F3FF] dark:bg-[#0F172A] border border-[#DDD6FE] dark:border-[#334155] grid place-items-center text-[16px] shrink-0">📊</span>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold text-[#64748B] leading-none">Segmentasi Relawan</div>
+                    <div className="text-[20px] font-extrabold text-[#0F172A] dark:text-white leading-none mt-1.5">8</div>
+                    <div className="text-[10px] text-[#94A3AF] mt-1">Kategori relawan</div>
+                  </div>
+                </div>
               </div>
 
               {/* middle row: map + right column */}
@@ -366,8 +616,11 @@ export default function Home() {
                         <option value="semua">Semua Segmentasi</option>
                         {SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}
                       </select>
-                      <select value={kec} onChange={e=> setKec(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden md:block">
+                      <select value={kec} onChange={e=> handleKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden md:block">
                         {KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}
+                      </select>
+                      <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden md:block disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+                        {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                       </select>
                     </div>
                   </div>
@@ -376,7 +629,7 @@ export default function Home() {
                     {/* Map - keep all logic */}
                     <div className="absolute inset-0">
                       {mapView==="relawan" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0"><MapRelawan relawans={filteredRelawansForMap} tps={filteredTps} showTPS={false} /></div>}
-                      {mapView==="suara" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0"><MapSuara tps={tpsList} mode={mode} kecamatan={kec} /></div>}
+                      {mapView==="suara" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0"><MapSuara tps={tpsList} mode={mode} kecamatan={kec} kelurahan={kel} /></div>}
                       {mapView==="komparasi-a" && <div className="h-full overflow-auto p-2 bg-white dark:bg-[#1E293B]"><MapKomparasiA tps={filteredTps} relawans={filteredRelawansForMap} mode={mode} opacity={opacity} /></div>}
                       {mapView==="komparasi-b" && <div className="h-full overflow-auto p-2 bg-white dark:bg-[#1E293B]"><MapKomparasiB tps={filteredTps} relawans={filteredRelawansForMap} radius={radius} /></div>}
                     </div>
@@ -584,11 +837,28 @@ export default function Home() {
           {tab==="koordinator" && (
             <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Koordinator — {koors.length} orang</h2><p className="text-[12px] text-[#64748B]">Sebar di 3 kecamatan Dapil 1</p></div>
+                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Koordinator — {formatNumber(stats.k)} / {formatNumber(targetKoor)} target <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold" style={{ background: progKoor.color+"14", color: progKoor.color, borderColor: progKoor.color+"30" }}>{formatPct(progKoor.pct)}%</span></h2><p className="text-[12px] text-[#64748B]">Sebar di 3 kecamatan Dapil 1 · {progKoor.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progKoor.remaining)} lagi`} — {progKoor.label}</p></div>
                 <div className="flex items-center gap-2">
-                  <select value={kec} onChange={e=>setKec(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]"><option value="Semua kecamatan">Semua kecamatan</option>{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="hidden sm:inline-flex bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">⚙ Atur Target</button>
+                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]"><option value="Semua kecamatan">Semua kecamatan</option>{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+                    {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
+                  </select>
                   <button onClick={()=> setShowTambahKoor(true)} className="bg-[#2563EB] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow">+ Tambah Koordinator</button>
                 </div>
+              </div>
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
+                    <span className="text-[#334155] dark:text-[#CBD5E1]">Progress koordinator</span>
+                    <span style={{ color: progKoor.color }}>{formatNumber(stats.k)} / {formatNumber(targetKoor)} · {formatPct(progKoor.pct)}%</span>
+                  </div>
+                  <div className="mt-1.5 h-2 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progKoor.pctClamped}%`, background: progKoor.color }} />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[10px]"><span className="text-[#64748B]">{progKoor.remaining===0 ? "🎉 Tercapai" : `${formatNumber(progKoor.remaining)} lagi menuju target`}</span><span className="font-bold" style={{ color: progKoor.color }}>{progKoor.label}</span></div>
+                </div>
+                <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="shrink-0 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">Ubah target</button>
               </div>
               <div className="overflow-auto rounded-xl border border-[#E2E8F0] dark:border-[#334155]">
                 <table className="w-full text-[13px]">
@@ -613,9 +883,10 @@ export default function Home() {
                     <input placeholder="Nama lengkap" value={formKoor.nama} onChange={e=>setFormKoor({...formKoor, nama:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
                     <input placeholder="WA +62..." value={formKoor.wa} onChange={e=>setFormKoor({...formKoor, wa:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
                     <div className="grid grid-cols-2 gap-2">
-                      <input placeholder="Kelurahan" value={formKoor.kelurahan} onChange={e=>setFormKoor({...formKoor, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
-                      <select value={formKoor.kecamatan} onChange={e=>setFormKoor({...formKoor, kecamatan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                      <select value={formKoor.kecamatan} onChange={e=>{ const kecVal=e.target.value; const kels=KELURAHAN_BY_KEC[kecVal]??[]; const keepKel = kels.includes(formKoor.kelurahan) ? formKoor.kelurahan : (kels[0]??""); setFormKoor(prev=>({...prev, kecamatan:kecVal, kelurahan: keepKel})); }} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                      <select value={formKoor.kelurahan} onChange={e=>setFormKoor({...formKoor, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{(KELURAHAN_BY_KEC[formKoor.kecamatan] ?? []).map(k=> <option key={k} value={k}>{k}</option>)}</select>
                     </div>
+                    <p className="text-[11px] text-[#94A3AF]">Pilih kecamatan → dropdown kelurahan di sebelahnya ikut. Titik peta koordinator ikut kelurahan.</p>
                     <div className="flex justify-end gap-2"><button onClick={()=>setShowTambahKoor(false)} className="px-4 py-2 text-[13px] font-medium text-[#64748B]">Batal</button><button onClick={handleAddKoor} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
                   </div>
                 </div>
@@ -627,12 +898,26 @@ export default function Home() {
           {tab==="relawan" && (
             <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Nama Relawan — {filteredRelawans.length} / {relawans.length} tampil</h2><p className="text-[12px] text-[#64748B]">Warna badge konsisten dengan peta</p></div>
+                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Nama Relawan — {filteredRelawans.length} / {relawans.length} tampil <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold align-middle" style={{ background: progRelawan.color+"14", color: progRelawan.color, borderColor: progRelawan.color+"30" }}>{formatPct(progRelawan.pct)}% dari target</span></h2><p className="text-[12px] text-[#64748B]">{formatNumber(stats.r)} / {formatNumber(targetRelawan)} relawan · {progRelawan.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progRelawan.remaining)} lagi`} — {progRelawan.label} · Warna badge konsisten dengan peta</p></div>
+                <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="hidden sm:inline-flex bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1] shrink-0">⚙ Atur Target</button>
                 <div className="flex flex-wrap items-center gap-2">
                   <input placeholder="Cari nama / kelurahan" value={searchRelawan} onChange={e=>setSearchRelawan(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-56 outline-none" />
                   <select value={filterSeg} onChange={e=>setFilterSeg(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white"><option value="semua">Semua segmentasi</option>{SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}</select>
                   <select value={filterKoor} onChange={e=>setFilterKoor(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white"><option value="semua">Semua koordinator</option>{koors.map(k=> <option key={k.id} value={k.id}>{k.nama}</option>)}</select>
                 </div>
+              </div>
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
+                    <span className="text-[#334155] dark:text-[#CBD5E1]">Progress relawan</span>
+                    <span style={{ color: progRelawan.color }}>{formatNumber(stats.r)} / {formatNumber(targetRelawan)} · {formatPct(progRelawan.pct)}%</span>
+                  </div>
+                  <div className="mt-1.5 h-2 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progRelawan.pctClamped}%`, background: progRelawan.color }} />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[10px]"><span className="text-[#64748B]">{progRelawan.remaining===0 ? "🎉 Tercapai" : `${formatNumber(progRelawan.remaining)} lagi menuju target`}</span><span className="font-bold" style={{ color: progRelawan.color }}>{progRelawan.label}</span></div>
+                </div>
+                <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="shrink-0 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">Ubah target</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 <label className="text-[13px] bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 font-bold cursor-pointer shadow">Import Excel/CSV <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportRelawan} /></label>
@@ -677,13 +962,18 @@ export default function Home() {
                       <input placeholder="WA 628..." value={formRelawan.wa} onChange={e=>setFormRelawan({...formRelawan, wa:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                       <select value={formRelawan.segmentasi} onChange={e=>setFormRelawan({...formRelawan, segmentasi:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}</select>
                       <select value={formRelawan.koordinatorId} onChange={e=>setFormRelawan({...formRelawan, koordinatorId:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white">{koors.map(k=> <option key={k.id} value={k.id}>{k.nama} — {k.kecamatan}</option>)}</select>
-                      <input placeholder="Alamat" value={formRelawan.alamat} onChange={e=>setFormRelawan({...formRelawan, alamat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white" />
-                      <input placeholder="Kelurahan" value={formRelawan.kelurahan} onChange={e=>setFormRelawan({...formRelawan, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
-                      <select value={formRelawan.kecamatan} onChange={e=>setFormRelawan({...formRelawan, kecamatan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                      <input placeholder="Alamat (Jl. ...)" value={formRelawan.alamat} onChange={e=>setFormRelawan({...formRelawan, alamat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <select value={formRelawan.kecamatan} onChange={e=>{ const kecVal=e.target.value; const kels=KELURAHAN_BY_KEC[kecVal]??[]; const kelFirst=kels[0]??""; const keepKel = kels.includes(formRelawan.kelurahan) ? formRelawan.kelurahan : kelFirst; setFormRelawan(prev=>({...prev, kecamatan:kecVal, kelurahan: keepKel})); }} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        {KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}
+                      </select>
+                      <select value={formRelawan.kelurahan} onChange={e=>setFormRelawan({...formRelawan, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        {(KELURAHAN_BY_KEC[formRelawan.kecamatan] ?? []).map(k=> <option key={k} value={k}>{k}</option>)}
+                      </select>
                       <input placeholder="RT/RW 01/02" value={formRelawan.rtRw} onChange={e=>setFormRelawan({...formRelawan, rtRw:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                       <input placeholder="Lat -6.98" value={formRelawan.lat} onChange={e=>setFormRelawan({...formRelawan, lat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                       <input placeholder="Lng 110.42" value={formRelawan.lng} onChange={e=>setFormRelawan({...formRelawan, lng:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                     </div>
+                    <p className="text-[11px] text-[#94A3AF]">Pilih kecamatan → dropdown kelurahan di sebelahnya ikut. Alamat bebas (mis. Jl. Pemuda No. 10). Kelurahan menentukan titik peta — lat/lng otomatis diisi jika kosong; bisa edit manual.</p>
                     <div className="flex justify-end gap-2"><button onClick={()=>setShowTambahRelawan(false)} className="px-4 py-2 text-[13px] text-[#64748B]">Batal</button><button onClick={handleAddRelawan} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
                   </div>
                 </div>
@@ -697,7 +987,10 @@ export default function Home() {
                 <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Data TPS — {filteredTps.length} / {tpsList.length} TPS</h2><p className="text-[12px] text-[#64748B]">34 kelurahan Dapil 1 · import massal didukung</p></div>
                 <div className="flex items-center gap-2">
                   <input placeholder="Cari TPS / kelurahan" value={searchTps} onChange={e=>setSearchTps(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-52 outline-none" />
-                  <select value={kec} onChange={e=>setKec(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+                    {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
+                  </select>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -723,6 +1016,163 @@ export default function Home() {
             </section>
           )}
 
+          {tab==="laporan" && (
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-[18px] font-extrabold text-[#0F172A] dark:text-white leading-none">Laporan & Analitik</h1>
+                  <p className="text-[12px] text-[#64748B] mt-1">Rekap per kecamatan & per kelurahan Dapil 1 (34 kelurahan) — bisa diexport PDF/CSV. Filter ikut kecamatan/kelurahan di bawah.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={exportLaporanPdf} disabled={exportingPdf} className="bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow disabled:opacity-60 flex items-center gap-1.5">{exportingPdf ? "Membuat PDF..." : "⬇ Export PDF"}</button>
+                  <button onClick={exportRekapCsv} className="bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">Export CSV</button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex flex-wrap gap-2 items-end">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-[#64748B]">Kecamatan</span>
+                  <select value={laporanKec} onChange={e=>handleLaporanKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] min-w-[170px]">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-[#64748B]">Kelurahan</span>
+                  <select value={laporanKel} onChange={e=> setLaporanKel(e.target.value)} disabled={laporanKec==="Semua kecamatan"} title={laporanKec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] min-w-[170px] disabled:opacity-50 disabled:cursor-not-allowed">{laporanKelOptions.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                </label>
+                <label className="flex flex-col gap-1 flex-1 min-w-[180px] max-w-[260px]">
+                  <span className="text-[11px] font-bold text-[#64748B]">Cari kelurahan</span>
+                  <input value={laporanSearch} onChange={e=> setLaporanSearch(e.target.value)} placeholder="Cari Kemijen, Pekunden..." className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white outline-none w-full" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-[#64748B]">Urut kelurahan</span>
+                  <select value={laporanSort} onChange={e=> setLaporanSort(e.target.value as any)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]">
+                    <option value="kelurahan">A-Z kelurahan</option>
+                    <option value="relawan">Relawan terbanyak</option>
+                    <option value="tps">TPS terbanyak</option>
+                    <option value="dpt">DPT terbesar</option>
+                  </select>
+                </label>
+                <span className="text-[11px] text-[#94A3AF] py-2">{rekapKel.length} kelurahan tampil · {rekapKec.length} kecamatan</span>
+              </div>
+
+              {(()=>{ const sum = rekapKec.reduce((a,c)=>({ tps:a.tps+c.tpsCount, dpt:a.dpt+c.dpt, sah:a.sah+c.suaraSah, sr:a.sr+c.suaraSR, pks:a.pks+c.suaraPKS, rel:a.rel+c.relawan, koor:a.koor+c.koordinator }), {tps:0,dpt:0,sah:0,sr:0,pks:0,rel:0,koor:0}); return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
+                  {[
+                    {label:"TPS", v: sum.tps, sub: `${rekapKel.length} kelurahan`},
+                    {label:"DPT", v: formatNumber(sum.dpt), sub: "pemilih"},
+                    {label:"Suara Sah", v: formatNumber(sum.sah), sub: `${sum.sah? Math.round(sum.sah/sum.dpt*100):0}% dari DPT`},
+                    {label:"SR", v: formatNumber(sum.sr), sub: "Siti Roika"},
+                    {label:"PKS", v: formatNumber(sum.pks), sub: "suara partai"},
+                    {label:"Relawan", v: formatNumber(sum.rel), sub: `${formatPct(sum.rel/targetRelawan*100)}% target`},
+                    {label:"Koordinator", v: formatNumber(sum.koor), sub: `${formatPct(sum.koor/targetKoor*100)}% target`},
+                  ].map(card=>(
+                    <div key={card.label} className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                      <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wide">{card.label}</div>
+                      <div className="text-[16px] font-extrabold text-[#0F172A] dark:text-white leading-none mt-1">{card.v}</div>
+                      <div className="text-[10px] text-[#94A3AF] mt-1 truncate">{card.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              )})()}
+
+              <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                <div className="px-4 py-3 border-b border-[#E2E8F0] dark:border-[#334155] flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-[#0F172A] dark:text-white text-[13px]">Rekap per Kecamatan</div>
+                  <span className="text-[11px] text-[#64748B]">{rekapKec.length} kecamatan · total {formatNumber(rekapKec.reduce((a,c)=>a+c.tpsCount,0))} TPS</span>
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full text-[12px]">
+                    <thead className="bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr>
+                      <th className="text-left py-2.5 px-3">Kecamatan</th>
+                      <th className="text-right px-2">Kelurahan</th>
+                      <th className="text-right px-2">TPS</th>
+                      <th className="text-right px-2">DPT</th>
+                      <th className="text-right px-2">Sah</th>
+                      <th className="text-right px-2">SR</th>
+                      <th className="text-right px-2">PKS</th>
+                      <th className="text-right px-2">Relawan</th>
+                      <th className="text-right px-3">Koordinator</th>
+                    </tr></thead>
+                    <tbody>
+                      {rekapKec.map(r=>(
+                        <tr key={r.kecamatan} className="border-t border-[#F1F5F9] dark:border-[#0F172A] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A]">
+                          <td className="py-2.5 px-3 font-bold text-[#0F172A] dark:text-white whitespace-nowrap">{r.kecamatan}</td>
+                          <td className="text-right tabular-nums px-2">{r.kelCount}</td>
+                          <td className="text-right tabular-nums px-2 font-semibold">{r.tpsCount}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.dpt)}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.suaraSah)}</td>
+                          <td className="text-right tabular-nums px-2 font-bold text-[#2563EB]">{formatNumber(r.suaraSR)}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.suaraPKS)}</td>
+                          <td className="text-right tabular-nums px-2 font-bold">{formatNumber(r.relawan)}</td>
+                          <td className="text-right tabular-nums px-3">{formatNumber(r.koordinator)}</td>
+                        </tr>
+                      ))}
+                      {rekapKec.length===0 && <tr><td colSpan={9} className="py-10 text-center text-[#94A3AF]">Tidak ada data untuk filter ini.</td></tr>}
+                    </tbody>
+                    {rekapKec.length>0 && (
+                      <tfoot className="bg-[#F8FAFC] dark:bg-[#0F172A] border-t-2 border-[#E2E8F0] dark:border-[#334155] font-bold text-[#0F172A] dark:text-white">
+                        <tr>
+                          <td className="py-2.5 px-3 text-right" colSpan={2}>TOTAL</td>
+                          <td className="text-right px-2 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.tpsCount,0))}</td>
+                          <td className="text-right px-2 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.dpt,0))}</td>
+                          <td className="text-right px-2 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.suaraSah,0))}</td>
+                          <td className="text-right px-2 tabular-nums text-[#2563EB]">{formatNumber(rekapKec.reduce((a,c)=>a+c.suaraSR,0))}</td>
+                          <td className="text-right px-2 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.suaraPKS,0))}</td>
+                          <td className="text-right px-2 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.relawan,0))}</td>
+                          <td className="text-right px-3 tabular-nums">{formatNumber(rekapKec.reduce((a,c)=>a+c.koordinator,0))}</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                <div className="px-4 py-3 border-b border-[#E2E8F0] dark:border-[#334155] flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-[#0F172A] dark:text-white text-[13px]">Rekap per Kelurahan — {rekapKel.length} baris</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#64748B] hidden sm:inline">{laporanSearch ? `cari "${laporanSearch}" · ` : ""}urut {laporanSort}</span>
+                    <button onClick={exportLaporanPdf} disabled={exportingPdf} className="text-[11px] font-bold text-[#2563EB] border border-[#DBEAFE] dark:border-[#334155] bg-[#EFF6FF] dark:bg-[#0F172A] rounded-full px-3 py-1 disabled:opacity-60">Export PDF (kelurahan)</button>
+                  </div>
+                </div>
+                <div className="overflow-auto max-h-[520px]">
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr>
+                      <th className="text-right py-2.5 px-2 w-8">#</th>
+                      <th className="text-left px-2">Kecamatan</th>
+                      <th className="text-left px-2">Kelurahan</th>
+                      <th className="text-right px-2">TPS</th>
+                      <th className="text-right px-2">DPT</th>
+                      <th className="text-right px-2">Sah</th>
+                      <th className="text-right px-2">SR</th>
+                      <th className="text-right px-2">PKS</th>
+                      <th className="text-right px-3">Relawan</th>
+                    </tr></thead>
+                    <tbody>
+                      {rekapKel.map((r,i)=>(
+                        <tr key={`${r.kecamatan}|${r.kelurahan}`} className="border-t border-[#F1F5F9] dark:border-[#0F172A] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A]">
+                          <td className="text-right tabular-nums px-2 text-[#94A3AF]">{i+1}</td>
+                          <td className="px-2 text-[#64748B] whitespace-nowrap">{r.kecamatan}</td>
+                          <td className="px-2 font-bold text-[#0F172A] dark:text-white whitespace-nowrap">{r.kelurahan}</td>
+                          <td className="text-right tabular-nums px-2">{r.tpsCount}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.dpt)}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.suaraSah)}</td>
+                          <td className="text-right tabular-nums px-2 font-bold text-[#2563EB]">{formatNumber(r.suaraSR)}</td>
+                          <td className="text-right tabular-nums px-2">{formatNumber(r.suaraPKS)}</td>
+                          <td className="text-right tabular-nums px-3 font-bold">{r.relawan}</td>
+                        </tr>
+                      ))}
+                      {rekapKel.length===0 && <tr><td colSpan={9} className="py-10 text-center text-[#94A3AF]">Tidak ada kelurahan cocok.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-3 py-2 bg-[#F8FAFC] dark:bg-[#0F172A] border-t border-[#E2E8F0] dark:border-[#334155] text-[11px] text-[#64748B] flex flex-wrap gap-2">
+                  <span>Detail per kelurahan — scroll untuk lihat ↓</span>
+                  <span className="ml-auto">Sumber: Dapil 1 · 34 kelurahan resmi — data ikut filter di atas & export PDF/CSV</span>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* bottom info row kelurahan - compact */}
           {tab==="peta" && (
             <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 flex flex-wrap items-center gap-2 text-[11px] text-[#64748B]">
@@ -735,6 +1185,52 @@ export default function Home() {
           )}
         </main>
       </div>
+
+      {/* Modal Atur Target */}
+      {showTargetModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={()=>setShowTargetModal(false)}>
+          <div className="bg-white dark:bg-[#1E293B] rounded-2xl p-5 w-full max-w-md space-y-4 shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div className="font-bold text-[#0F172A] dark:text-white text-[15px]">Atur Target</div>
+              <button onClick={()=>setShowTargetModal(false)} className="w-7 h-7 rounded-full bg-[#F1F5F9] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[#64748B] text-[12px]">✕</button>
+            </div>
+            <p className="text-[11px] text-[#64748B] -mt-2">Ubah angka target untuk demo presentasi. Persentase = <code className="bg-[#F1F5F9] dark:bg-[#0F172A] px-1 py-0.5 rounded border border-[#E2E8F0] dark:border-[#334155]">tercapai / target × 100%</code>. Tersimpan otomatis di browser.</p>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1]">Target Relawan</span>
+                <input type="number" min={1} value={draftTargetRelawan} onChange={e=>setDraftTargetRelawan(e.target.value)} placeholder="mis. 10000" className="mt-1 w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none focus:border-[#93C5FD]" />
+                <span className="text-[11px] text-[#94A3AF]">contoh presentasi: 10.000</span>
+              </label>
+              <label className="block">
+                <span className="text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1]">Target Koordinator Relawan</span>
+                <input type="number" min={1} value={draftTargetKoor} onChange={e=>setDraftTargetKoor(e.target.value)} placeholder="mis. 250 atau 8000" className="mt-1 w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none focus:border-[#93C5FD]" />
+                <span className="text-[11px] text-[#94A3AF]">contoh presentasi: 250 (atau 8.000 jika pakai skala besar)</span>
+              </label>
+            </div>
+            {(()=>{ const r = Math.floor(Number(draftTargetRelawan)||0); const k = Math.floor(Number(draftTargetKoor)||0); const pr = r>0 ? calcProgress(stats.r, r) : null; const pk = k>0 ? calcProgress(stats.k, k) : null; if(!pr || !pk) return <div className="text-[11px] text-amber-600 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">Isi kedua target dengan angka &gt; 0 untuk preview.</div>; return (
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 space-y-2">
+                <div className="text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">Preview persentase</div>
+                <div className="flex items-center justify-between text-[11px]"><span className="text-[#64748B]">Relawan {formatNumber(stats.r)} / {formatNumber(r)}</span><span className="font-extrabold px-2 py-0.5 rounded-full border" style={{ background: pr.color+"14", color: pr.color, borderColor: pr.color+"30" }}>{formatPct(pr.pct)}% · {pr.label}</span></div>
+                <div className="h-1.5 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pr.pctClamped}%`, background: pr.color }} /></div>
+                <div className="flex items-center justify-between text-[11px]"><span className="text-[#64748B]">Koordinator {formatNumber(stats.k)} / {formatNumber(k)}</span><span className="font-extrabold px-2 py-0.5 rounded-full border" style={{ background: pk.color+"14", color: pk.color, borderColor: pk.color+"30" }}>{formatPct(pk.pct)}% · {pk.label}</span></div>
+                <div className="h-1.5 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pk.pctClamped}%`, background: pk.color }} /></div>
+              </div>
+            )})()}
+            <div className="flex justify-end gap-2">
+              <button onClick={()=>{ setDraftTargetRelawan(String(TARGET_RELAWAN_DEFAULT)); setDraftTargetKoor(String(TARGET_KOOR_DEFAULT)); }} className="px-4 py-2 text-[13px] font-medium text-[#64748B]">Reset default</button>
+              <button onClick={()=>setShowTargetModal(false)} className="px-4 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1] bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full">Batal</button>
+              <button onClick={()=>{
+                const r = Math.floor(Number(draftTargetRelawan));
+                const k = Math.floor(Number(draftTargetKoor));
+                if(!(r>0) || !(k>0)) return alert("Target harus angka > 0");
+                persistTarget(r, k); setTargetRelawan(r); setTargetKoor(k); setShowTargetModal(false);
+              }} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ChatBot ctx={{ stats, targetRelawan, targetKoor, progRelawan, progKoor, rekapKec, rekapKel, segCounts, topKoors: topKoors.map(k=>({ nama:k.nama, kecamatan:k.kecamatan, cnt:k.cnt })), blanks: blanks.map(b=>({ tps:{ kelurahan:b.tps.kelurahan, kecamatan:b.tps.kecamatan, dpt:b.tps.dpt, noTps:b.tps.noTps }, jarakTerdekat:b.jarakTerdekat, blank:b.blank })) }} />
 
       {/* mobile bottom nav */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white dark:bg-[#0F172A] border-t border-[#E2E8F0] dark:border-[#334155] flex items-center justify-around py-2 px-2 z-40">

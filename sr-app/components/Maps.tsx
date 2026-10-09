@@ -12,7 +12,7 @@ function useMounted() {
   return m;
 }
 
-type PropsSuara = { tps: TPS[]; mode: "total"|"sr"|"pks"; kecamatan: string };
+type PropsSuara = { tps: TPS[]; mode: "total"|"sr"|"pks"; kecamatan: string; kelurahan?: string };
 type PropsRelawan = { relawans: Relawan[]; tps?: TPS[]; showTPS?: boolean };
 type PropsKomparasiB = { tps: TPS[]; relawans: Relawan[]; radius:number };
 
@@ -47,9 +47,13 @@ const CircleMarker = dynamic(()=> import("react-leaflet").then(m=>m.CircleMarker
 const Popup = dynamic(()=> import("react-leaflet").then(m=>m.Popup), {ssr:false}) as any;
 const Tooltip = dynamic(()=> import("react-leaflet").then(m=>m.Tooltip), {ssr:false}) as any;
 
-export function MapSuara({tps, mode, kecamatan}: PropsSuara){
+export function MapSuara({tps, mode, kecamatan, kelurahan="Semua kelurahan"}: PropsSuara){
   const mounted = useMounted();
-  const filtered = kecamatan==="Semua kecamatan" ? tps : tps.filter(t=> t.kecamatan===kecamatan);
+  const filtered = tps.filter(t=>{
+    if(kecamatan!=="Semua kecamatan" && t.kecamatan!==kecamatan) return false;
+    if(kelurahan!=="Semua kelurahan" && t.kelurahan!==kelurahan) return false;
+    return true;
+  });
   const center: [number,number] = filtered[0] ? [filtered[0].lat, filtered[0].lng] : [-6.98, 110.42];
   if(filtered.length===0){
     return <MapFrame><EmptyState /></MapFrame>

@@ -1,5 +1,5 @@
 "use client";
-export type TabKey = "peta" | "koordinator" | "relawan" | "data-tps";
+export type TabKey = "peta" | "koordinator" | "relawan" | "data-tps" | "laporan";
 
 export function PillTabs({active, onChange}:{active:TabKey; onChange:(k:TabKey)=>void}){
   const tabs: {k:TabKey; label:string; desc:string}[] = [

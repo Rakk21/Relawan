@@ -1,33 +1,61 @@
-# SR Map System — Relawan Siti Roika Dapil 1 Kota Semarang
+# SR Map System — Pemetaan Relawan Siti Roika Dapil 1 Kota Semarang
 
-**Status:** Dokumentasi V1 Lengkap (Siap Implementasi)
+**Status:** Dokumentasi V1 selesai dan siap masuk tahap implementasi.
 
-### Isi Paket Dokumentasi
-```
+## Isi Dokumentasi
+
+```text
 SR-Relawan-Siti-Roika/
 ├── docs/
-│   ├── PRD.md                 ← Product Requirements Document (scope, fitur F01-F11, KPI, roadmap)
-│   ├── ARCHITECTURE.md        ← Arsitektur, ERD, Prisma schema, API contract, deployment Azure
-│   └── RANCANGAN-SISTEM.md    ← Wireframe replika screenshot, user flow, warna segmentasi, validasi import
+│   ├── PRD.md
+│   ├── ARCHITECTURE.md
+│   └── RANCANGAN-SISTEM.md
 ├── templates/
-│   ├── template_data_tps.xlsx ← (akan digenerate saat scaffolding code)
+│   ├── template_data_tps.xlsx
 │   └── template_relawan.xlsx
-└── README.md                  ← file ini
+└── README.md
 ```
 
-### 3 Peta Kunci (sesuai request)
-1. **Peta Relawan** — cluster marker warna by segmentasi (Relawan SR, Majelis Taklim, RT/RW, UMKM, OJOL, Advokasi, Remaja)
-2. **Peta Suara SR 2024 VS Peta Relawan SR** — overlay heatmap + titik, analisis kecamatan suara tinggi tapi relawan tipis
-3. **Peta TPS Dapil 1 VS Peta Relawan SR** — blank spot detection 500m (TPS merah = tanpa relawan)
+Keterangan dokumen:
 
-### Dashboard Replika Screenshot
-Header hitam `DAPIL 1 · KOTA SEMARANG / Relawan Siti Roika` + 5 cards (Koordinator, Relawan, TPS Terdata, Suara Siti Roika orange active, Suara PKS) + Tabs Peta Suara/Koordinator/Relawan/Data TPS + Sub-filter + Empty state.
+* **PRD.md** — Berisi gambaran sistem, fitur yang akan dibuat, target yang ingin dicapai, dan rencana pengembangan.
+* **ARCHITECTURE.md** — Menjelaskan teknologi yang digunakan, struktur database, ERD, API, dan rencana deployment.
+* **RANCANGAN-SISTEM.md** — Berisi rancangan tampilan website, alur penggunaan sistem, warna untuk setiap segmentasi relawan, dan aturan saat mengimpor data.
+* **Template Excel** — Digunakan sebagai format awal untuk memasukkan data relawan dan TPS. File template akan dibuat saat proses setup proyek.
 
-### Cara Pakai Dokumen
-1. Share `docs/PRD.md` ke tim pemenangan untuk approval scope.
-2. Share `docs/ARCHITECTURE.md` ke tim tech untuk estimasi & setup DB.
-3. Share `docs/RANCANGAN-SISTEM.md` ke designer/dev untuk eksekusi UI peta.
+## Tiga Peta Utama
 
-### Langkah Selanjutnya (Pilih salah satu)
-- **Opsi A:** Aku scaffold boilerplate `Next.js + Prisma + PostGIS + Leaflet` replika 100% screenshot — tinggal `npm install && npm run dev`.
-- **Opsi B:** Export 3 dokumen ini ke PDF siap cetak.
+### 1. Peta Relawan
+
+Peta ini digunakan untuk melihat persebaran relawan berdasarkan wilayah dan segmentasinya, seperti Relawan SR, Majelis Taklim, RT/RW, UMKM, OJOL, Advokasi, dan Remaja. Setiap segmentasi dibedakan dengan warna marker agar lebih mudah dikenali.
+
+### 2. Peta Suara SR 2024 vs Peta Relawan SR
+
+Peta ini digunakan untuk membandingkan persebaran suara SR pada tahun 2024 dengan jumlah relawan yang ada saat ini. Dari perbandingan tersebut, kita bisa melihat wilayah yang memiliki suara tinggi tetapi jumlah relawannya masih sedikit.
+
+### 3. Peta TPS Dapil 1 vs Peta Relawan SR
+
+Peta ini digunakan untuk melihat lokasi TPS dan persebaran relawan di sekitarnya. TPS yang belum memiliki relawan dalam radius 500 meter akan ditandai dengan warna merah agar wilayah yang belum terjangkau bisa lebih mudah diketahui.
+
+## Rancangan Dashboard
+
+Dashboard menggunakan header berwarna hitam dengan informasi **Dapil 1 · Kota Semarang / Relawan Siti Roika**.
+
+Di bagian utama terdapat lima kartu statistik yang menampilkan jumlah koordinator, relawan, TPS terdata, suara Siti Roika, dan suara PKS. Kartu suara Siti Roika menggunakan warna oranye sebagai penanda utama.
+
+Dashboard juga dilengkapi beberapa menu, yaitu Peta Suara, Koordinator, Relawan, dan Data TPS. Setiap menu memiliki filter yang bisa digunakan untuk menampilkan data sesuai kebutuhan.
+
+Jika belum ada data yang ditampilkan, sistem akan menampilkan halaman kosong dengan keterangan yang jelas agar pengguna tahu bahwa data belum tersedia.
+
+## Cara Menggunakan Dokumentasi
+
+1. **PRD.md** dibagikan ke tim pemenangan untuk membahas dan menyepakati fitur yang akan dibuat.
+2. **ARCHITECTURE.md** digunakan oleh tim pengembang sebagai acuan dalam menyiapkan teknologi, database, dan API.
+3. **RANCANGAN-SISTEM.md** digunakan sebagai panduan saat membuat tampilan website dan fitur pemetaan.
+
+## Langkah Selanjutnya
+
+Setelah dokumentasi selesai, pengembangan bisa dilanjutkan ke tahap berikutnya.
+
+* **Opsi A — Mulai membuat sistem:** Menyiapkan proyek menggunakan Next.js, Prisma, PostGIS, dan Leaflet, kemudian mulai mengembangkan fitur sesuai rancangan yang sudah dibuat.
+* **Opsi B — Membuat dokumentasi PDF:** Mengubah ketiga dokumen menjadi PDF agar lebih mudah dibagikan dan digunakan sebagai bahan pembahasan bersama tim.

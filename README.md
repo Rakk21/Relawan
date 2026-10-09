@@ -31,5 +31,3 @@ Header hitam `DAPIL 1 · KOTA SEMARANG / Relawan Siti Roika` + 5 cards (Koordina
 ### Langkah Selanjutnya (Pilih salah satu)
 - **Opsi A:** Aku scaffold boilerplate `Next.js + Prisma + PostGIS + Leaflet` replika 100% screenshot — tinggal `npm install && npm run dev`.
 - **Opsi B:** Export 3 dokumen ini ke PDF siap cetak.
-
-Bilang aja "lanjut scaffold" atau "export PDF", langsung aku eksekusi.

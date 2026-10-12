@@ -1,11 +1,11 @@
 ﻿"use client";
 import { formatNumber } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
-import { PillTabs, SubFilter, TabKey } from "@/components/Tabs";
+import type { TabKey } from "@/components/Tabs";
 import { MapSuara, MapRelawan, MapKomparasiA, MapKomparasiB } from "@/components/Maps";
-import { TPS_SEED, RELAWAN_SEED, KOORDINATORS, KECAMATAN, KELURAHAN_BY_KEC, KELURAHAN_CENTER, getKelurahanCenter, type TPS, type Relawan, type Koordinator } from "@/lib/mockData";
+import { TPS_SEED, RELAWAN_SEED, KOORDINATORS, KECAMATAN, KELURAHAN_BY_KEC, getKelurahanCenter, type TPS, type Relawan, type Koordinator } from "@/lib/mockData";
 import { SEGMENTASI, segBySlug } from "@/lib/segmentasi";
-import { blankSpot, korelasiByKecamatan, rekapByKecamatan, rekapByKelurahan } from "@/lib/geo";
+import { blankSpot, rekapByKecamatan, rekapByKelurahan } from "@/lib/geo";
 import { TARGET_RELAWAN_DEFAULT, TARGET_KOOR_DEFAULT, calcProgress, formatPct } from "@/lib/target";
 import ChatBot from "@/components/ChatBot";
 
@@ -30,7 +30,8 @@ export default function Home() {
   const [showTambahKoor, setShowTambahKoor] = useState(false);
   const [formRelawan, setFormRelawan] = useState({nama:"", wa:"", alamat:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", rtRw:"01/02", lat:"-6.9837", lng:"110.4197", segmentasi:"ojol", koordinatorId:"k1"});
   const [formKoor, setFormKoor] = useState({nama:"", wa:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah"});
-  const [showErf, setShowErf] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showMapLegend, setShowMapLegend] = useState(false);
   const [theme, setTheme] = useState<"light"|"dark">("light");
   const [segOpen, setSegOpen] = useState(true);
   const [perbandinganOpen, setPerbandinganOpen] = useState(false);
@@ -114,7 +115,6 @@ export default function Home() {
     if(kel!=="Semua kelurahan" && t.kelurahan!==kel) return false;
     return true;
   }), relawans, radius), [tpsList, relawans, radius, kec, kel]);
-  const korelasi = useMemo(()=> korelasiByKecamatan(tpsList, relawans), [tpsList, relawans]);
 
   const segCounts = useMemo(()=>{
     const c: Record<string, number> = {};
@@ -384,8 +384,42 @@ export default function Home() {
     { slug:"lainnya", label:"Lainnya", color:"#9CA3AF" },
   ];
 
+  // close mobile drawer on tab change
+  useEffect(()=>{ setMobileNavOpen(false); },[tab]);
+  function navTo(tabKey: TabKey){ setTab(tabKey); setMobileNavOpen(false); }
+  function navToPeta(view: "suara"|"relawan"|"komparasi-a"|"komparasi-b"){ setTab("peta"); setMapView(view); setMobileNavOpen(false); window.scrollTo({top:0, behavior:"smooth"}); }
+  function openSettings(){ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); setMobileNavOpen(false); }
+
   return (
     <div className="min-h-screen bg-[#F1F5F9] dark:bg-[#0F172A] flex">
+      {/* MOBILE DRAWER */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-[70] lg:hidden">
+          <button aria-label="Tutup navigasi" onClick={()=>setMobileNavOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="absolute left-0 top-0 bottom-0 w-[280px] max-w-[86vw] bg-white dark:bg-[#0F172A] border-r border-[#E2E8F0] dark:border-[#334155] flex flex-col overflow-hidden shadow-2xl">
+            <div className="h-[56px] flex items-center gap-2.5 px-4 border-b border-[#E2E8F0] dark:border-[#1E293B] shrink-0">
+              <span className="w-9 h-9 rounded-xl bg-[#0EA5E9] grid place-items-center text-white text-[18px] shrink-0">🫂</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-extrabold text-[#0F172A] dark:text-white leading-none">Relawan SR</div>
+                <div className="text-[10px] text-[#64748B] font-medium">Dapil 1 · 34 Kelurahan</div>
+              </div>
+              <button onClick={()=>setMobileNavOpen(false)} className="w-8 h-8 rounded-full bg-[#F1F5F9] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[#64748B]">✕</button>
+            </div>
+            <nav className="flex-1 overflow-auto p-2 space-y-0.5">
+              <button type="button" onClick={()=>navToPeta("relawan")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="peta" && mapView==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8]"}`}>▦ Dashboard</button>
+              <button type="button" onClick={()=>navToPeta("suara")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="peta" && mapView==="suara" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8]"}`}>🗺️ Peta Suara</button>
+              <button type="button" onClick={()=>navTo("koordinator")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="koordinator" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>👥 Koordinator Relawan</button>
+              <button type="button" onClick={()=>navTo("relawan")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>👤 Nama Relawan</button>
+              <button type="button" onClick={()=>navToPeta("komparasi-a")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="peta" && mapView==="komparasi-a" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>◫ Suara vs Relawan</button>
+              <button type="button" onClick={()=>navToPeta("komparasi-b")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="peta" && mapView==="komparasi-b" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>⌖ TPS vs Relawan</button>
+              <button type="button" onClick={()=>navTo("laporan")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>📊 Laporan & Analitik</button>
+              <button type="button" onClick={()=>navTo("data-tps")} className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left ${tab==="data-tps" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8]"}`}>🗳️ Data TPS</button>
+              <button type="button" onClick={openSettings} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-bold text-left text-[#475569] dark:text-[#94A3B8]">⚙ Pengaturan</button>
+            </nav>
+            <div className="p-3 border-t border-[#E2E8F0] dark:border-[#334155] text-[10px] text-[#94A3AF]">Relawan SR v1.0.0 · Dapil 1 · 34 Kelurahan</div>
+          </div>
+        </div>
+      )}
       {/* SIDEBAR */}
       <aside className="hidden lg:flex w-[240px] shrink-0 bg-white dark:bg-[#0F172A] border-r border-[#E2E8F0] dark:border-[#1E293B] flex-col sticky top-0 h-screen overflow-hidden">
         <div className="h-[56px] flex items-center gap-2.5 px-4 border-b border-[#E2E8F0] dark:border-[#1E293B] shrink-0">
@@ -397,21 +431,24 @@ export default function Home() {
         </div>
 
         <nav className="flex-1 overflow-auto p-2 space-y-0.5">
-          <button onClick={()=>{ setTab("peta"); setMapView("relawan"); }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="peta" && mapView==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+          <button type="button" onClick={()=>{ setTab("peta"); setMapView("relawan"); }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="peta" && mapView==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
             <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[12px]">▦</span>
             Dashboard
           </button>
 
           <div>
-            <button onClick={()=> setSegOpen(v=>!v)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5 text-left">
+            <button type="button" aria-expanded={segOpen} onClick={()=> { setTab("relawan"); setFilterSeg("semua"); setSegOpen(v=>!v); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5 text-left">
               <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">◈</span>
               <span className="flex-1">Segmentasi Relawan</span>
               <span className={`text-[10px] transition ${segOpen?"rotate-180":""}`}>▾</span>
             </button>
             {segOpen && (
               <div className="ml-4 pl-4 border-l border-[#E2E8F0] dark:border-[#1E293B] space-y-0.5 mt-0.5">
+                <button type="button" onClick={()=>{ setTab("relawan"); setFilterSeg("semua"); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${filterSeg==="semua" && tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B] hover:text-[#334155]"}`}>
+                  • Semua segmentasi
+                </button>
                 {SEGMENTASI.map(s=>(
-                  <button key={s.slug} onClick={()=>{ setTab("relawan"); setFilterSeg(s.slug); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${filterSeg===s.slug && tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B] hover:text-[#334155]"}`}>
+                  <button type="button" key={s.slug} onClick={()=>{ setTab("relawan"); setFilterSeg(s.slug); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${filterSeg===s.slug && tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B] hover:text-[#334155]"}`}>
                     • {s.nama}
                   </button>
                 ))}
@@ -419,51 +456,61 @@ export default function Home() {
             )}
           </div>
 
-          <button onClick={()=> setTab("koordinator")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="koordinator" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+          <button type="button" onClick={()=> navTo("koordinator")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="koordinator" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
             <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">👥</span>
             Koordinator Relawan
           </button>
 
-          <button onClick={()=> setTab("relawan")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+          <button type="button" onClick={()=> navTo("relawan")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
             <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">👤</span>
             Nama Relawan
           </button>
 
-          <button onClick={()=>{ setTab("peta"); setMapView("relawan"); }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="peta" && mapView==="relawan" ? "bg-[#EFF6FF] text-[#2563EB]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50"}`}>
+          <button type="button" onClick={()=> navToPeta("suara")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="peta" && mapView==="suara" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+            <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">🗺️</span>
+            Peta Suara
+          </button>
+
+          <button type="button" onClick={()=> navToPeta("relawan")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="peta" && mapView==="relawan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
             <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">📍</span>
             Peta Relawan
           </button>
 
           <div>
-            <button onClick={()=> setPerbandinganOpen(v=>!v)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5 text-left">
+            <button type="button" aria-expanded={perbandinganOpen} onClick={()=> { setTab("peta"); setMapView("komparasi-a"); setPerbandinganOpen(v=>!v); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5 text-left">
               <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">◫</span>
               <span className="flex-1">Perbandingan Peta</span>
               <span className={`text-[10px] transition ${perbandinganOpen?"rotate-180":""}`}>▾</span>
             </button>
             {perbandinganOpen && (
               <div className="ml-4 pl-4 border-l border-[#E2E8F0] dark:border-[#1E293B] space-y-0.5 mt-0.5">
-                <button onClick={()=>{ setTab("peta"); setMapView("komparasi-a"); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${mapView==="komparasi-a" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold":"text-[#64748B]"}`}>• Suara SR vs Relawan</button>
-                <button onClick={()=>{ setTab("peta"); setMapView("komparasi-b"); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${mapView==="komparasi-b" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold":"text-[#64748B]"}`}>• TPS vs Relawan</button>
+                <button type="button" onClick={()=>{ setTab("peta"); setMapView("komparasi-a"); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="peta" && mapView==="komparasi-a" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold":"text-[#64748B] hover:text-[#334155]"}`}>• Suara SR vs Relawan</button>
+                <button type="button" onClick={()=>{ setTab("peta"); setMapView("komparasi-b"); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="peta" && mapView==="komparasi-b" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold":"text-[#64748B] hover:text-[#334155]"}`}>• TPS vs Relawan</button>
               </div>
             )}
           </div>
 
+          <button type="button" onClick={()=> navTo("data-tps")} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="data-tps" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+            <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">🗳️</span>
+            Data TPS
+          </button>
+
           <div>
-            <button onClick={()=> setLaporanOpen(v=>!v)} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50"}`}>
+            <button type="button" aria-expanded={laporanOpen} onClick={()=> { setTab("laporan"); setLaporanOpen(v=>!v); }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-left ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] dark:bg-[#1E293B] dark:text-[#60A5FA]" : "text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5"}`}>
               <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">📊</span>
               <span className="flex-1">Laporan & Analitik</span>
               <span className={`text-[10px] transition ${laporanOpen?"rotate-180":""}`}>▾</span>
             </button>
             {laporanOpen && (
               <div className="ml-4 pl-4 border-l border-[#E2E8F0] dark:border-[#1E293B] space-y-0.5 mt-0.5">
-                <button onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B]"}`}>• Rekap Kecamatan</button>
-                <button onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B]"}`}>• Rekap Kelurahan</button>
-                <button onClick={()=> setTab("data-tps")} className="w-full text-left px-3 py-1.5 rounded-lg text-[12px] text-[#64748B]">• Data TPS</button>
+                <button type="button" onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B] hover:text-[#334155]"}`}>• Rekap Kecamatan</button>
+                <button type="button" onClick={()=> setTab("laporan")} className={`w-full text-left px-3 py-1.5 rounded-lg text-[12px] ${tab==="laporan" ? "bg-[#EFF6FF] text-[#2563EB] font-semibold" : "text-[#64748B] hover:text-[#334155]"}`}>• Rekap Kelurahan</button>
+                <button type="button" onClick={()=> setTab("data-tps")} className="w-full text-left px-3 py-1.5 rounded-lg text-[12px] text-[#64748B] hover:text-[#334155]">• Data TPS</button>
               </div>
             )}
           </div>
 
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 text-left">
+          <button type="button" onClick={openSettings} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium text-[#475569] dark:text-[#94A3B8] hover:bg-slate-50 dark:hover:bg-white/5 text-left">
             <span className="w-7 h-7 rounded-lg bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[11px]">⚙</span>
             Pengaturan
           </button>
@@ -487,7 +534,7 @@ export default function Home() {
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         {/* TOP BAR */}
         <header className="h-[56px] shrink-0 bg-white dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#1E293B] flex items-center gap-3 px-3 sm:px-4">
-          <button className="lg:hidden w-8 h-8 rounded-lg border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[#64748B]">☰</button>
+          <button onClick={()=>setMobileNavOpen(v=>!v)} aria-label="Buka navigasi" className="lg:hidden w-9 h-9 rounded-xl border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[#334155] dark:text-[#CBD5E1] bg-white dark:bg-[#1E293B] active:scale-95">☰</button>
           <div className="flex-1 max-w-[560px] relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3AF] text-[13px]">⌕</span>
             <input value={searchTop} onChange={e=>{ setSearchTop(e.target.value); setSearchRelawan(e.target.value); }} placeholder="Cari nama relawan, koordinator, wilayah, atau kata kunci..." className="w-full bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full pl-9 pr-4 py-2 text-[13px] placeholder:text-[#94A3AF] outline-none focus:border-[#93C5FD] focus:bg-white dark:focus:bg-[#0F172A]" />
@@ -508,7 +555,7 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="flex-1 bg-[#F1F5F9] dark:bg-[#020617] p-3 sm:p-4 space-y-4 overflow-auto">
+        <main className="flex-1 bg-[#F1F5F9] dark:bg-[#020617] p-3 sm:p-4 space-y-4 overflow-auto pb-[calc(72px+env(safe-area-inset-bottom))] lg:pb-4">
           {/* banner import */}
           {importMsg && <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-[13px] rounded-xl px-4 py-2.5">{importMsg}</div>}
 
@@ -529,8 +576,8 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* KPI — 2 kartu target + 2 info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              {/* KPI — 1 kolom HP kecil, 2 kolom SM, 4 desktop */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 {/* Total Relawan — dengan target */}
                 <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex flex-col">
                   <div className="flex items-start justify-between gap-2">
@@ -605,37 +652,45 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* middle row: map + right column */}
-              <div className="grid xl:grid-cols-[1.65fr_0.85fr] gap-4">
+               {/* middle row: map + right column */}
+              <div className="grid lg:grid-cols-[1.5fr_1fr] xl:grid-cols-[1.65fr_0.85fr] gap-4">
                 {/* Peta Sebaran */}
-                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden flex flex-col shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                  <div className="h-[44px] flex items-center justify-between px-3 border-b border-[#E2E8F0] dark:border-[#334155] shrink-0">
-                    <div className="flex items-center gap-2 text-[13px] font-bold text-[#0F172A] dark:text-white"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[11px]">🗺️</span> Peta Sebaran Relawan</div>
-                    <div className="flex items-center gap-2">
-                      <select value={filterSeg} onChange={e=> setFilterSeg(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden sm:block">
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] overflow-hidden flex flex-col shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+                  <div className="flex flex-col gap-2 px-3 py-2.5 border-b border-[#E2E8F0] dark:border-[#334155] shrink-0 lg:flex-row lg:items-center lg:justify-between lg:py-0 lg:min-h-[52px] lg:gap-3">
+                    <div className="flex items-center gap-2 text-[13px] font-bold text-[#0F172A] dark:text-white shrink-0"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[11px]">🗺️</span> <span className="truncate">{mapView==="suara" ? "Peta Suara" : mapView==="relawan" ? "Peta Sebaran Relawan" : mapView==="komparasi-a" ? "Suara vs Relawan" : "TPS vs Relawan"}</span></div>
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2 sm:overflow-x-auto sm:no-scrollbar w-full lg:w-auto lg:justify-end lg:pb-0">
+                      <select value={filterSeg} onChange={e=> setFilterSeg(e.target.value)} className="w-full sm:w-auto sm:shrink-0 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-2 text-[11px] text-[#334155] dark:text-[#CBD5E1] sm:min-w-[135px]">
                         <option value="semua">Semua Segmentasi</option>
                         {SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}
                       </select>
-                      <select value={kec} onChange={e=> handleKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden md:block">
+                      <select value={kec} onChange={e=> handleKecChange(e.target.value)} className="w-full sm:w-auto sm:shrink-0 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-2 text-[11px] text-[#334155] dark:text-[#CBD5E1] sm:min-w-[150px]">
                         {KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}
                       </select>
-                      <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-1.5 text-[11px] text-[#334155] dark:text-[#CBD5E1] hidden md:block disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+                      <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="w-full sm:w-auto sm:shrink-0 col-span-2 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-lg px-2.5 py-2 text-[11px] text-[#334155] dark:text-[#CBD5E1] disabled:opacity-50 disabled:cursor-not-allowed sm:min-w-[150px]">
                         {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                       </select>
                     </div>
+                    {(mapView==="suara" || mapView==="komparasi-a") && (
+                      <div className="flex items-center gap-1 bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full p-1 self-start lg:self-auto">
+                        {[{k:"total",label:"Sah"},{k:"sr",label:"SR"},{k:"pks",label:"PKS"}].map(m=>(
+                          <button key={m.k} type="button" onClick={()=>setMode(m.k as any)} title={m.k==="total"?"Suara sah":m.k==="sr"?"Siti Roika":"PKS"} className={`px-3 py-1 rounded-full text-[11px] font-bold ${mode===m.k?"bg-[#2563EB] text-white":"text-[#64748B]"}`}>{m.label}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="relative flex-1 min-h-[420px] bg-[#E0F2FE] dark:bg-[#0F172A] overflow-hidden">
+                  <div className="relative flex-1 min-h-[320px] sm:min-h-[420px] lg:min-h-[480px] bg-[#E0F2FE] dark:bg-[#0F172A] overflow-hidden">
                     {/* Map - keep all logic */}
                     <div className="absolute inset-0">
-                      {mapView==="relawan" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0"><MapRelawan relawans={filteredRelawansForMap} tps={filteredTps} showTPS={false} /></div>}
-                      {mapView==="suara" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0"><MapSuara tps={tpsList} mode={mode} kecamatan={kec} kelurahan={kel} /></div>}
-                      {mapView==="komparasi-a" && <div className="h-full overflow-auto p-2 bg-white dark:bg-[#1E293B]"><MapKomparasiA tps={filteredTps} relawans={filteredRelawansForMap} mode={mode} opacity={opacity} /></div>}
-                      {mapView==="komparasi-b" && <div className="h-full overflow-auto p-2 bg-white dark:bg-[#1E293B]"><MapKomparasiB tps={filteredTps} relawans={filteredRelawansForMap} radius={radius} /></div>}
+                      {mapView==="relawan" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0 [&>div]:!min-h-0"><MapRelawan relawans={filteredRelawansForMap} tps={filteredTps} showTPS={false} /></div>}
+                      {mapView==="suara" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0 [&>div]:!min-h-0"><MapSuara tps={tpsList} mode={mode} kecamatan={kec} kelurahan={kel} /></div>}
+                      {mapView==="komparasi-a" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0 [&>div]:!min-h-0"><MapKomparasiA tps={filteredTps} relawans={filteredRelawansForMap} mode={mode} opacity={opacity} /></div>}
+                      {mapView==="komparasi-b" && <div className="h-full [&>div]:!rounded-none [&>div]:!border-0 [&>div]:!min-h-0"><MapKomparasiB tps={filteredTps} relawans={filteredRelawansForMap} radius={radius} /></div>}
                     </div>
 
-                    {/* checklist overlay ala screenshot */}
-                    <div className="absolute left-2 top-2 w-[148px] bg-white dark:bg-[#1E293B] rounded-lg border border-[#E2E8F0] dark:border-[#334155] shadow p-2 space-y-1">
+                    {/* checklist overlay — collapsible di HP agar tidak menutup peta */}
+                    <button type="button" onClick={()=>setShowMapLegend(v=>!v)} className="map-overlay sm:hidden absolute left-2 top-2 bg-white dark:bg-[#1E293B] rounded-full border border-[#E2E8F0] dark:border-[#334155] shadow px-3 py-1.5 text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">{showMapLegend ? "✕ Tutup legenda" : "◈ Legenda"}</button>
+                    <div className={`map-overlay absolute left-2 top-12 sm:top-2 w-[148px] bg-white dark:bg-[#1E293B] rounded-lg border border-[#E2E8F0] dark:border-[#334155] shadow p-2 space-y-1 ${showMapLegend ? "block" : "hidden"} sm:block`}>
                       <div className="text-[11px] font-bold text-[#0F172A] dark:text-white">Segmentasi Relawan</div>
                       {donutData.map(d=>{
                         const active = filterSeg==="semua" || filterSeg===d.slug;
@@ -661,15 +716,15 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* mode switcher bottom */}
-                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white dark:bg-[#1E293B] rounded-full border border-[#E2E8F0] dark:border-[#334155] shadow px-1 py-1 flex gap-1">
+                    {/* mode switcher bottom — scroll horizontal di HP */}
+                    <div className="map-overlay absolute bottom-2 left-1/2 -translate-x-1/2 max-w-[calc(100%-16px)] bg-white dark:bg-[#1E293B] rounded-full border border-[#E2E8F0] dark:border-[#334155] shadow px-1 py-1 flex gap-1 overflow-x-auto no-scrollbar">
                       {[
                         {k:"relawan", label:"Relawan"},
                         {k:"suara", label:"Suara"},
                         {k:"komparasi-a", label:"Komparasi A"},
                         {k:"komparasi-b", label:"Komparasi B"},
                       ].map(b=>(
-                        <button key={b.k} onClick={()=> setMapView(b.k as any)} className={`px-3 py-1 rounded-full text-[11px] font-bold ${mapView===b.k ? "bg-[#2563EB] text-white" : "text-[#64748B] hover:bg-slate-50 dark:hover:bg-white/5"}`}>{b.label}</button>
+                        <button type="button" key={b.k} onClick={()=> setMapView(b.k as any)} className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold min-h-[32px] ${mapView===b.k ? "bg-[#2563EB] text-white" : "text-[#64748B] hover:bg-slate-50 dark:hover:bg-white/5"}`}>{b.label}</button>
                       ))}
                     </div>
                   </div>
@@ -692,14 +747,14 @@ export default function Home() {
                 </div>
 
                 {/* Right column */}
-                <div className="space-y-4">
+                <div className="space-y-4 min-w-0">
                   {/* Donut */}
                   <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[13px] font-bold text-[#0F172A] dark:text-white"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[11px]">◈</span> Segmentasi Relawan</div>
-                      <button onClick={()=> setTab("relawan")} className="text-[11px] text-[#2563EB] font-semibold">Lihat →</button>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-[13px] font-bold text-[#0F172A] dark:text-white min-w-0"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[11px] shrink-0">◈</span> <span className="truncate">Segmentasi Relawan</span></div>
+                      <button type="button" onClick={()=> setTab("relawan")} className="text-[11px] text-[#2563EB] font-semibold shrink-0">Lihat →</button>
                     </div>
-                    <div className="flex gap-3 mt-3">
+                    <div className="flex flex-col sm:flex-row gap-3 mt-3">
                       <div className="relative w-[132px] h-[132px] shrink-0">
                         <svg width="132" height="132" viewBox="0 0 132 132" className="-rotate-90">
                           {(()=>{ const total = donutData.reduce((a,d)=> a + (segCounts[d.slug]||0), 0) || 1; let off=0; return donutData.map(d=>{ const v=segCounts[d.slug]||0; const pct=v/total; const len=2*Math.PI*44*pct; const el=<circle key={d.slug} cx="66" cy="66" r="44" fill="none" stroke={d.color} strokeWidth="16" strokeDasharray={`${len} ${2*Math.PI*44}`} strokeDashoffset={`${-off}`} />; off+=len; return el; })})()}
@@ -781,11 +836,11 @@ export default function Home() {
               </div>
 
               {/* bottom comparison cards */}
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-[12px] font-bold text-[#0F172A] dark:text-white"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[10px]">🗺️</span> Peta Suara SR 2024 vs Peta Relawan SR</div>
-                    <button onClick={()=>{ setTab("peta"); setMapView("komparasi-a"); window.scrollTo({top:0, behavior:"smooth"}); }} className="text-[11px] text-[#2563EB] font-semibold">Lihat Detail →</button>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-[#0F172A] dark:text-white min-w-0"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[10px] shrink-0">🗺️</span> <span className="truncate">Peta Suara SR 2024 vs Peta Relawan SR</span></div>
+                    <button type="button" onClick={()=>{ setTab("peta"); setMapView("komparasi-a"); window.scrollTo({top:0, behavior:"smooth"}); }} className="text-[11px] text-[#2563EB] font-semibold shrink-0">Lihat Detail →</button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <div>
@@ -806,10 +861,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-[12px] font-bold text-[#0F172A] dark:text-white"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[10px]">⌖</span> Peta TPS Dapil 1 vs Peta Relawan SR</div>
-                    <button onClick={()=>{ setTab("peta"); setMapView("komparasi-b"); window.scrollTo({top:0, behavior:"smooth"}); }} className="text-[11px] text-[#2563EB] font-semibold">Lihat Detail →</button>
+                <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-[#0F172A] dark:text-white min-w-0"><span className="w-6 h-6 rounded bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] grid place-items-center text-[10px] shrink-0">⌖</span> <span className="truncate">Peta TPS Dapil 1 vs Peta Relawan SR</span></div>
+                    <button type="button" onClick={()=>{ setTab("peta"); setMapView("komparasi-b"); window.scrollTo({top:0, behavior:"smooth"}); }} className="text-[11px] text-[#2563EB] font-semibold shrink-0">Lihat Detail →</button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <div>
@@ -835,19 +890,20 @@ export default function Home() {
 
           {/* KOORDINATOR TAB */}
           {tab==="koordinator" && (
-            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Koordinator — {formatNumber(stats.k)} / {formatNumber(targetKoor)} target <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold" style={{ background: progKoor.color+"14", color: progKoor.color, borderColor: progKoor.color+"30" }}>{formatPct(progKoor.pct)}%</span></h2><p className="text-[12px] text-[#64748B]">Sebar di 3 kecamatan Dapil 1 · {progKoor.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progKoor.remaining)} lagi`} — {progKoor.label}</p></div>
-                <div className="flex items-center gap-2">
-                  <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="hidden sm:inline-flex bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">⚙ Atur Target</button>
-                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]"><option value="Semua kecamatan">Semua kecamatan</option>{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
-                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 sm:p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="min-w-0"><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Koordinator — {formatNumber(stats.k)} / {formatNumber(targetKoor)} target <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold" style={{ background: progKoor.color+"14", color: progKoor.color, borderColor: progKoor.color+"30" }}>{formatPct(progKoor.pct)}%</span></h2><p className="text-[12px] text-[#64748B]">Sebar di 3 kecamatan Dapil 1 · {progKoor.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progKoor.remaining)} lagi`} — {progKoor.label}</p></div>
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
+                  <button type="button" onClick={openSettings} className="col-span-2 sm:col-span-1 sm:hidden bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">⚙ Atur Target</button>
+                  <button type="button" onClick={openSettings} className="hidden sm:inline-flex bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">⚙ Atur Target</button>
+                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="w-full sm:w-auto bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]"><option value="Semua kecamatan">Semua kecamatan</option>{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="w-full sm:w-auto bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed sm:min-w-[150px]">
                     {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                   </select>
-                  <button onClick={()=> setShowTambahKoor(true)} className="bg-[#2563EB] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow">+ Tambah Koordinator</button>
+                  <button type="button" onClick={()=> setShowTambahKoor(true)} className="col-span-2 sm:col-span-1 bg-[#2563EB] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow min-h-[40px]">+ Tambah Koordinator</button>
                 </div>
               </div>
-              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex items-center gap-3">
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex flex-col sm:flex-row sm:items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
                     <span className="text-[#334155] dark:text-[#CBD5E1]">Progress koordinator</span>
@@ -856,12 +912,13 @@ export default function Home() {
                   <div className="mt-1.5 h-2 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] overflow-hidden">
                     <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progKoor.pctClamped}%`, background: progKoor.color }} />
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px]"><span className="text-[#64748B]">{progKoor.remaining===0 ? "🎉 Tercapai" : `${formatNumber(progKoor.remaining)} lagi menuju target`}</span><span className="font-bold" style={{ color: progKoor.color }}>{progKoor.label}</span></div>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[10px]"><span className="text-[#64748B] truncate">{progKoor.remaining===0 ? "🎉 Tercapai" : `${formatNumber(progKoor.remaining)} lagi menuju target`}</span><span className="font-bold shrink-0" style={{ color: progKoor.color }}>{progKoor.label}</span></div>
                 </div>
-                <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="shrink-0 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">Ubah target</button>
+                <button type="button" onClick={openSettings} className="shrink-0 bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[11px] font-bold text-[#334155] dark:text-[#CBD5E1]">Ubah target</button>
               </div>
-              <div className="overflow-auto rounded-xl border border-[#E2E8F0] dark:border-[#334155]">
-                <table className="w-full text-[13px]">
+              <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+                <div className="overflow-auto rounded-xl border border-[#E2E8F0] dark:border-[#334155]">
+                  <table className="w-full text-[13px] min-w-[560px]">
                   <thead className="text-[#64748B] bg-[#F8FAFC] dark:bg-[#0F172A]"><tr><th className="text-left py-2.5 px-3">Nama</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-right px-2">Relawan</th><th className="text-left pl-3">Status</th></tr></thead>
                   <tbody>
                     {(kec==="Semua kecamatan"? koors: koors.filter(k=>k.kecamatan===kec)).map(k=>(
@@ -875,10 +932,11 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
               {showTambahKoor && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={()=>setShowTambahKoor(false)}>
-                  <div className="bg-white dark:bg-[#1E293B] rounded-2xl p-5 w-full max-w-md space-y-3 shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>setShowTambahKoor(false)}>
+                  <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-md space-y-3 shadow-xl border border-[#E2E8F0] dark:border-[#334155] max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
                     <div className="font-bold text-[#0F172A] dark:text-white">Tambah Koordinator</div>
                     <input placeholder="Nama lengkap" value={formKoor.nama} onChange={e=>setFormKoor({...formKoor, nama:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
                     <input placeholder="WA +62..." value={formKoor.wa} onChange={e=>setFormKoor({...formKoor, wa:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
@@ -896,17 +954,19 @@ export default function Home() {
 
           {/* RELAWAN TAB */}
           {tab==="relawan" && (
-            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Nama Relawan — {filteredRelawans.length} / {relawans.length} tampil <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold align-middle" style={{ background: progRelawan.color+"14", color: progRelawan.color, borderColor: progRelawan.color+"30" }}>{formatPct(progRelawan.pct)}% dari target</span></h2><p className="text-[12px] text-[#64748B]">{formatNumber(stats.r)} / {formatNumber(targetRelawan)} relawan · {progRelawan.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progRelawan.remaining)} lagi`} — {progRelawan.label} · Warna badge konsisten dengan peta</p></div>
-                <button onClick={()=>{ setDraftTargetRelawan(String(targetRelawan)); setDraftTargetKoor(String(targetKoor)); setShowTargetModal(true); }} className="hidden sm:inline-flex bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-1.5 text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1] shrink-0">⚙ Atur Target</button>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input placeholder="Cari nama / kelurahan" value={searchRelawan} onChange={e=>setSearchRelawan(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-56 outline-none" />
-                  <select value={filterSeg} onChange={e=>setFilterSeg(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white"><option value="semua">Semua segmentasi</option>{SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}</select>
-                  <select value={filterKoor} onChange={e=>setFilterKoor(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white"><option value="semua">Semua koordinator</option>{koors.map(k=> <option key={k.id} value={k.id}>{k.nama}</option>)}</select>
+            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 sm:p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="min-w-0"><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Nama Relawan — {filteredRelawans.length} / {relawans.length} tampil <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold align-middle" style={{ background: progRelawan.color+"14", color: progRelawan.color, borderColor: progRelawan.color+"30" }}>{formatPct(progRelawan.pct)}% dari target</span></h2><p className="text-[12px] text-[#64748B]">{formatNumber(stats.r)} / {formatNumber(targetRelawan)} relawan · {progRelawan.remaining===0 ? "target terpenuhi ✓" : `sisa ${formatNumber(progRelawan.remaining)} lagi`} — {progRelawan.label} · Warna badge konsisten dengan peta</p></div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={openSettings} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[12px] font-bold text-[#334155] dark:text-[#CBD5E1] shrink-0 min-h-[40px]">⚙ Atur Target</button>
                 </div>
               </div>
-              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex items-center gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  <input placeholder="Cari nama / kelurahan" value={searchRelawan} onChange={e=>setSearchRelawan(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-full outline-none min-h-[40px]" />
+                  <select value={filterSeg} onChange={e=>setFilterSeg(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white w-full min-h-[40px]"><option value="semua">Semua segmentasi</option>{SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}</select>
+                  <select value={filterKoor} onChange={e=>setFilterKoor(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white w-full sm:col-span-2 lg:col-span-1 min-h-[40px]"><option value="semua">Semua koordinator</option>{koors.map(k=> <option key={k.id} value={k.id}>{k.nama}</option>)}</select>
+                </div>
+              <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex flex-col sm:flex-row sm:items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
                     <span className="text-[#334155] dark:text-[#CBD5E1]">Progress relawan</span>
@@ -931,8 +991,9 @@ export default function Home() {
                   <button onClick={()=>{ setFilterSeg("semua"); setFilterKoor("semua"); setSearchRelawan(""); setSearchTop(""); }} className="ml-auto bg-white dark:bg-[#1E293B] border border-amber-200 dark:border-amber-800 rounded-full px-3 py-1 font-bold text-amber-700 dark:text-amber-200">Reset filter → tampil semua</button>
                 </div>
               )}
-              <div className="overflow-auto max-h-[560px] border border-[#E2E8F0] dark:border-[#334155] rounded-xl">
-                <table className="w-full text-[13px]">
+              <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+                <div className="overflow-auto max-h-[560px] border border-[#E2E8F0] dark:border-[#334155] rounded-xl">
+                  <table className="w-full text-[13px] min-w-[680px]">
                   <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">Nama</th><th className="text-left">Segmentasi</th><th className="text-left">Koordinator</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-left">Status</th></tr></thead>
                   <tbody>
                     {filteredRelawans.map(r=>{
@@ -950,19 +1011,20 @@ export default function Home() {
                     })}
                     {filteredRelawans.length===0 && <tr><td colSpan={6} className="py-10 text-center text-[#94A3AF]">Tidak ada relawan sesuai filter. Klik Reset filter.</td></tr>}
                   </tbody>
-                </table>
+                  </table>
+                </div>
               </div>
               <div className="text-[12px] text-[#64748B] text-center">Menampilkan semua {filteredRelawans.length} relawan dari {relawans.length} — scroll untuk lihat ↓</div>
               {showTambahRelawan && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={()=>setShowTambahRelawan(false)}>
-                  <div className="bg-white dark:bg-[#1E293B] rounded-2xl p-5 w-full max-w-lg space-y-3 max-h-[90vh] overflow-auto shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>setShowTambahRelawan(false)}>
+                  <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-lg space-y-3 max-h-[92vh] overflow-auto shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
                     <div className="font-bold text-[#0F172A] dark:text-white">Tambah Relawan</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input placeholder="Nama lengkap" value={formRelawan.nama} onChange={e=>setFormRelawan({...formRelawan, nama:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input placeholder="Nama lengkap" value={formRelawan.nama} onChange={e=>setFormRelawan({...formRelawan, nama:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] sm:col-span-2 bg-white dark:bg-[#0F172A] dark:text-white outline-none min-h-[44px]" />
                       <input placeholder="WA 628..." value={formRelawan.wa} onChange={e=>setFormRelawan({...formRelawan, wa:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                       <select value={formRelawan.segmentasi} onChange={e=>setFormRelawan({...formRelawan, segmentasi:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{SEGMENTASI.map(s=> <option key={s.slug} value={s.slug}>{s.nama}</option>)}</select>
-                      <select value={formRelawan.koordinatorId} onChange={e=>setFormRelawan({...formRelawan, koordinatorId:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white">{koors.map(k=> <option key={k.id} value={k.id}>{k.nama} — {k.kecamatan}</option>)}</select>
-                      <input placeholder="Alamat (Jl. ...)" value={formRelawan.alamat} onChange={e=>setFormRelawan({...formRelawan, alamat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] col-span-2 bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <select value={formRelawan.koordinatorId} onChange={e=>setFormRelawan({...formRelawan, koordinatorId:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] sm:col-span-2 bg-white dark:bg-[#0F172A] dark:text-white min-h-[44px]">{koors.map(k=> <option key={k.id} value={k.id}>{k.nama} — {k.kecamatan}</option>)}</select>
+                      <input placeholder="Alamat (Jl. ...)" value={formRelawan.alamat} onChange={e=>setFormRelawan({...formRelawan, alamat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] sm:col-span-2 bg-white dark:bg-[#0F172A] dark:text-white min-h-[44px]" />
                       <select value={formRelawan.kecamatan} onChange={e=>{ const kecVal=e.target.value; const kels=KELURAHAN_BY_KEC[kecVal]??[]; const kelFirst=kels[0]??""; const keepKel = kels.includes(formRelawan.kelurahan) ? formRelawan.kelurahan : kelFirst; setFormRelawan(prev=>({...prev, kecamatan:kecVal, kelurahan: keepKel})); }} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
                         {KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}
                       </select>
@@ -982,13 +1044,13 @@ export default function Home() {
           )}
 
           {tab==="data-tps" && (
-            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Data TPS — {filteredTps.length} / {tpsList.length} TPS</h2><p className="text-[12px] text-[#64748B]">34 kelurahan Dapil 1 · import massal didukung</p></div>
-                <div className="flex items-center gap-2">
-                  <input placeholder="Cari TPS / kelurahan" value={searchTps} onChange={e=>setSearchTps(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-52 outline-none" />
-                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
-                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]">
+            <section className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 sm:p-4 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div className="min-w-0"><h2 className="font-extrabold text-[#0F172A] dark:text-white text-[14px]">Data TPS — {filteredTps.length} / {tpsList.length} TPS</h2><p className="text-[12px] text-[#64748B]">34 kelurahan Dapil 1 · import massal didukung</p></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:items-center gap-2">
+                  <input placeholder="Cari TPS / kelurahan" value={searchTps} onChange={e=>setSearchTps(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white w-full sm:col-span-2 lg:w-52 outline-none min-h-[40px]" />
+                  <select value={kec} onChange={e=>handleKecChange(e.target.value)} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white w-full lg:w-auto min-h-[40px]">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white disabled:opacity-50 disabled:cursor-not-allowed w-full lg:w-auto lg:min-w-[150px] min-h-[40px]">
                     {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                   </select>
                 </div>
@@ -998,8 +1060,9 @@ export default function Home() {
                 <button onClick={()=> exportCSV("data-tps.csv", filteredTps.map(t=>({no_tps:t.noTps, kelurahan:t.kelurahan, kecamatan:t.kecamatan, lat:t.lat, lng:t.lng, dpt:t.dpt, suara_sah:t.suaraSah, suara_siti_roika:t.suaraSitiRoika, suara_pks:t.suaraPKS})), ["no_tps","kelurahan","kecamatan","lat","lng","dpt","suara_sah","suara_siti_roika","suara_pks"])} className="text-[13px] bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 font-bold dark:text-white">Export CSV</button>
                 <a href="/templates/template_data_tps.csv" download className="text-[12px] underline text-[#64748B] py-2">Download template</a>
               </div>
+              <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
               <div className="overflow-auto max-h-[520px] border border-[#E2E8F0] dark:border-[#334155] rounded-xl">
-                <table className="w-full text-[13px]">
+                <table className="w-full text-[13px] min-w-[760px]">
                   <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">TPS</th><th className="text-left">Kelurahan</th><th className="text-left">Kecamatan</th><th className="text-right px-2">DPT</th><th className="text-right px-2">Sah</th><th className="text-right px-2">SR</th><th className="text-right px-2">PKS</th><th className="text-left pl-2">Koordinat</th></tr></thead>
                   <tbody>
                     {filteredTps.map(t=>(
@@ -1013,38 +1076,39 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
+              </div>
             </section>
           )}
 
           {tab==="laporan" && (
-            <section className="space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+            <section className="space-y-4 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="min-w-0">
                   <h1 className="text-[18px] font-extrabold text-[#0F172A] dark:text-white leading-none">Laporan & Analitik</h1>
                   <p className="text-[12px] text-[#64748B] mt-1">Rekap per kecamatan & per kelurahan Dapil 1 (34 kelurahan) — bisa diexport PDF/CSV. Filter ikut kecamatan/kelurahan di bawah.</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={exportLaporanPdf} disabled={exportingPdf} className="bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow disabled:opacity-60 flex items-center gap-1.5">{exportingPdf ? "Membuat PDF..." : "⬇ Export PDF"}</button>
-                  <button onClick={exportRekapCsv} className="bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1]">Export CSV</button>
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2 shrink-0">
+                  <button onClick={exportLaporanPdf} disabled={exportingPdf} className="bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow disabled:opacity-60 flex items-center justify-center gap-1.5 min-h-[40px]">{exportingPdf ? "Membuat PDF..." : "⬇ Export PDF"}</button>
+                  <button onClick={exportRekapCsv} className="bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] font-bold text-[#334155] dark:text-[#CBD5E1] min-h-[40px]">Export CSV</button>
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] flex flex-wrap gap-2 items-end">
-                <label className="flex flex-col gap-1">
+              <div className="bg-white dark:bg-[#1E293B] rounded-xl border border-[#E2E8F0] dark:border-[#334155] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-2 lg:items-end">
+                <label className="flex flex-col gap-1 min-w-0">
                   <span className="text-[11px] font-bold text-[#64748B]">Kecamatan</span>
-                  <select value={laporanKec} onChange={e=>handleLaporanKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] min-w-[170px]">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={laporanKec} onChange={e=>handleLaporanKecChange(e.target.value)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] w-full sm:min-w-[170px] min-h-[40px]">{KECAMATAN.map(k=> <option key={k} value={k}>{k}</option>)}</select>
                 </label>
-                <label className="flex flex-col gap-1">
+                <label className="flex flex-col gap-1 min-w-0">
                   <span className="text-[11px] font-bold text-[#64748B]">Kelurahan</span>
-                  <select value={laporanKel} onChange={e=> setLaporanKel(e.target.value)} disabled={laporanKec==="Semua kecamatan"} title={laporanKec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] min-w-[170px] disabled:opacity-50 disabled:cursor-not-allowed">{laporanKelOptions.map(k=> <option key={k} value={k}>{k}</option>)}</select>
+                  <select value={laporanKel} onChange={e=> setLaporanKel(e.target.value)} disabled={laporanKec==="Semua kecamatan"} title={laporanKec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] w-full sm:min-w-[170px] disabled:opacity-50 disabled:cursor-not-allowed min-h-[40px]">{laporanKelOptions.map(k=> <option key={k} value={k}>{k}</option>)}</select>
                 </label>
-                <label className="flex flex-col gap-1 flex-1 min-w-[180px] max-w-[260px]">
+                <label className="flex flex-col gap-1 min-w-0 sm:col-span-2 lg:flex-1 lg:min-w-[180px] lg:max-w-[260px]">
                   <span className="text-[11px] font-bold text-[#64748B]">Cari kelurahan</span>
-                  <input value={laporanSearch} onChange={e=> setLaporanSearch(e.target.value)} placeholder="Cari Kemijen, Pekunden..." className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white outline-none w-full" />
+                  <input value={laporanSearch} onChange={e=> setLaporanSearch(e.target.value)} placeholder="Cari Kemijen, Pekunden..." className="border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 text-[13px] bg-[#F8FAFC] dark:bg-[#0F172A] dark:text-white outline-none w-full min-h-[40px]" />
                 </label>
-                <label className="flex flex-col gap-1">
+                <label className="flex flex-col gap-1 min-w-0">
                   <span className="text-[11px] font-bold text-[#64748B]">Urut kelurahan</span>
-                  <select value={laporanSort} onChange={e=> setLaporanSort(e.target.value as any)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px]">
+                  <select value={laporanSort} onChange={e=> setLaporanSort(e.target.value as any)} className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] w-full min-h-[40px]">
                     <option value="kelurahan">A-Z kelurahan</option>
                     <option value="relawan">Relawan terbanyak</option>
                     <option value="tps">TPS terbanyak</option>
@@ -1079,8 +1143,8 @@ export default function Home() {
                   <div className="font-bold text-[#0F172A] dark:text-white text-[13px]">Rekap per Kecamatan</div>
                   <span className="text-[11px] text-[#64748B]">{rekapKec.length} kecamatan · total {formatNumber(rekapKec.reduce((a,c)=>a+c.tpsCount,0))} TPS</span>
                 </div>
-                <div className="overflow-auto">
-                  <table className="w-full text-[12px]">
+                <div className="overflow-x-auto -mx-0">
+                  <table className="w-full text-[12px] min-w-[720px]">
                     <thead className="bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr>
                       <th className="text-left py-2.5 px-3">Kecamatan</th>
                       <th className="text-right px-2">Kelurahan</th>
@@ -1135,7 +1199,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="overflow-auto max-h-[520px]">
-                  <table className="w-full text-[12px]">
+                  <table className="w-full text-[12px] min-w-[760px]">
                     <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr>
                       <th className="text-right py-2.5 px-2 w-8">#</th>
                       <th className="text-left px-2">Kecamatan</th>
@@ -1188,8 +1252,8 @@ export default function Home() {
 
       {/* Modal Atur Target */}
       {showTargetModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={()=>setShowTargetModal(false)}>
-          <div className="bg-white dark:bg-[#1E293B] rounded-2xl p-5 w-full max-w-md space-y-4 shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>setShowTargetModal(false)}>
+          <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-md space-y-4 shadow-xl border border-[#E2E8F0] dark:border-[#334155] max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div className="font-bold text-[#0F172A] dark:text-white text-[15px]">Atur Target</div>
               <button onClick={()=>setShowTargetModal(false)} className="w-7 h-7 rounded-full bg-[#F1F5F9] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[#64748B] text-[12px]">✕</button>
@@ -1232,16 +1296,19 @@ export default function Home() {
 
       <ChatBot ctx={{ stats, targetRelawan, targetKoor, progRelawan, progKoor, rekapKec, rekapKel, segCounts, topKoors: topKoors.map(k=>({ nama:k.nama, kecamatan:k.kecamatan, cnt:k.cnt })), blanks: blanks.map(b=>({ tps:{ kelurahan:b.tps.kelurahan, kecamatan:b.tps.kecamatan, dpt:b.tps.dpt, noTps:b.tps.noTps }, jarakTerdekat:b.jarakTerdekat, blank:b.blank })) }} />
 
-      {/* mobile bottom nav */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white dark:bg-[#0F172A] border-t border-[#E2E8F0] dark:border-[#334155] flex items-center justify-around py-2 px-2 z-40">
-        {[
-          {k:"peta", label:"Dashboard"},
-          {k:"relawan", label:"Relawan"},
-          {k:"koordinator", label:"Koordinator"},
-          {k:"data-tps", label:"TPS"},
-        ].map(it=>(
-          <button key={it.k} onClick={()=> setTab(it.k as any)} className={`px-3 py-1.5 rounded-full text-[12px] font-bold border ${tab===it.k?"bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white border-[#0F172A]":"bg-white dark:bg-[#1E293B] border-[#E2E8F0] dark:border-[#334155] text-[#64748B]"}`}>{it.label}</button>
-        ))}
+      {/* mobile bottom nav — 44px min tap, safe-area */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 dark:bg-[#0F172A]/95 backdrop-blur border-t border-[#E2E8F0] dark:border-[#334155] z-40 safe-pb">
+        <div className="flex items-center justify-around py-2 px-1 gap-1 overflow-x-auto no-scrollbar">
+          {[
+            {k:"peta", label:"Dashboard"},
+            {k:"relawan", label:"Relawan"},
+            {k:"koordinator", label:"Koordinator"},
+            {k:"laporan", label:"Laporan"},
+            {k:"data-tps", label:"TPS"},
+          ].map(it=>(
+            <button key={it.k} onClick={()=> setTab(it.k as any)} className={`shrink-0 min-h-[40px] px-3.5 py-2 rounded-full text-[11px] font-extrabold border whitespace-nowrap active:scale-95 transition ${tab===it.k?"bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white border-[#0F172A] shadow":"bg-white dark:bg-[#1E293B] border-[#E2E8F0] dark:border-[#334155] text-[#64748B]"}`}>{it.label}</button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -37,8 +37,8 @@ function colorByMode(t: TPS, mode: "total"|"sr"|"pks"){
   return "#E2E8F0";
 }
 
-function MapFrame({children, height=520}:{children:React.ReactNode; height?:number}){
-  return <div style={{height}} className="rounded-2xl overflow-hidden border border-[#E7DDD0] bg-white relative isolate shadow-[0_8px_30px_rgba(28,25,23,0.08)] z-0">{children}</div>
+function MapFrame({children}:{children:React.ReactNode}){
+  return <div className="rounded-2xl overflow-hidden border border-[#E7DDD0] bg-white relative isolate shadow-[0_8px_30px_rgba(28,25,23,0.08)] z-0 w-full h-full min-h-[380px]">{children}</div>
 }
 
 const MapContainer = dynamic(()=> import("react-leaflet").then(m=>m.MapContainer), {ssr:false}) as any;
@@ -133,9 +133,9 @@ export function MapRelawan({relawans, tps, showTPS}: PropsRelawan){
 export function MapKomparasiA({tps, relawans, mode, opacity}:{tps:TPS[]; relawans:Relawan[]; mode:"total"|"sr"|"pks"; opacity:number}){
   const mounted = useMounted();
   const center: [number,number] = tps[0] ? [tps[0].lat, tps[0].lng] : [-6.98,110.42];
-  if (!mounted) return <MapFrame height={560}><div className="h-full bg-[#FFFBF5] animate-pulse" /></MapFrame>;
+  if (!mounted) return <MapFrame><div className="h-full bg-[#FFFBF5] animate-pulse" /></MapFrame>;
   return (
-    <MapFrame height={560}>
+    <MapFrame>
       {/* @ts-ignore */}
       <MapContainer center={center} zoom={13} scrollWheelZoom={false} style={{height:"100%", width:"100%"}} preferCanvas>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OSM · Dapil 1" />
@@ -160,7 +160,7 @@ export function MapKomparasiA({tps, relawans, mode, opacity}:{tps:TPS[]; relawan
 export function MapKomparasiB({tps, relawans, radius}: PropsKomparasiB){
   const mounted = useMounted();
   const center: [number,number] = tps[0] ? [tps[0].lat, tps[0].lng] : [-6.98,110.42];
-  if (!mounted) return <MapFrame height={560}><div className="h-full bg-[#FFFBF5] animate-pulse" /></MapFrame>;
+  if (!mounted) return <MapFrame><div className="h-full bg-[#FFFBF5] animate-pulse" /></MapFrame>;
   // scroll peta tidak hijack scroll halaman — zoom hanya via tombol +/- atau Ctrl+scroll
   const R=6371000;
   function hav(lat1:number,lng1:number,lat2:number,lng2:number){
@@ -175,7 +175,7 @@ export function MapKomparasiB({tps, relawans, radius}: PropsKomparasiB){
     return {t, jarak, blank: jarak===null || jarak>radius};
   });
   return (
-    <MapFrame height={560}>
+    <MapFrame>
       {/* @ts-ignore */}
       <MapContainer center={center} zoom={13} scrollWheelZoom={false} style={{height:"100%", width:"100%"}} preferCanvas>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OSM · Dapil 1" />

@@ -34,10 +34,28 @@ html.dark ::-webkit-scrollbar-thumb { background: #475569; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* leaflet */
+/* leaflet — turunkan z-index agar tidak menutup drawer/modal/chatbot/sidebar.
+   Default Leaflet pakai 400/1000 yang selalu menang lawan overlay Tailwind (z-40..z-70). */
 .leaflet-container { font-family: inherit; border-radius: 12px; }
-.leaflet-container .leaflet-pane { z-index: 400 !important; }
-.leaflet-container .leaflet-top, .leaflet-container .leaflet-bottom { z-index: 401 !important; }
-.leaflet-control-zoom a { color: #0F172A !important; border-radius: 8px !important; }
+.leaflet-container .leaflet-pane { z-index: 10 !important; }
+.leaflet-container .leaflet-top, .leaflet-container .leaflet-bottom { z-index: 20 !important; }
+.leaflet-container .leaflet-control-zoom a { color: #0F172A !important; border-radius: 8px !important; }
 .leaflet-control-attribution { font-size: 9px !important; opacity: 0.6; }
 .glass { background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); }
+
+/* overlay di atas peta (legend/checklist/switcher) — selalu di atas tile Leaflet */
+.map-overlay { z-index: 30; }
+/* popup Leaflet tetap di atas overlay biasa */
+.leaflet-popup-pane { z-index: 25 !important; }
+
+/* mobile */
+@media (max-width: 640px) {
+  html { font-size: 13px; }
+  .leaflet-control-zoom { display: none; } /* pakai pinch/2-finger — hemat ruang */
+}
+@media (max-width: 380px) {
+  html { font-size: 12.5px; }
+}
+/* safe-area untuk iphone notch */
+.safe-pb { padding-bottom: env(safe-area-inset-bottom); }
+.safe-pt { padding-top: env(safe-area-inset-top); }

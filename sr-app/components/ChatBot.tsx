@@ -32,7 +32,7 @@ export default function ChatBot({ ctx }: { ctx: ChatCtx }) {
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Tutup chat" : "Buka Tanya Data"}
-        className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[60] w-14 h-14 rounded-full bg-[#2563EB] text-white shadow-[0_8px_24px_rgba(37,99,235,0.4)] border border-white/20 flex items-center justify-center text-[22px] hover:bg-[#1D4ED8] transition"
+        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 lg:bottom-6 z-[60] w-14 h-14 rounded-full bg-[#2563EB] text-white shadow-[0_8px_24px_rgba(37,99,235,0.4)] border border-white/20 flex items-center justify-center text-[22px] hover:bg-[#1D4ED8] transition"
       >
         {open ? "✕" : "💬"}
         {!open && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-white animate-pulse" />}
@@ -40,7 +40,7 @@ export default function ChatBot({ ctx }: { ctx: ChatCtx }) {
 
       {/* Panel */}
       {open && (
-        <div className="fixed inset-0 sm:inset-auto sm:bottom-[88px] sm:right-6 z-[60] sm:w-[380px] w-full sm:h-[520px] h-[100dvh] sm:rounded-2xl rounded-none bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] shadow-[0_20px_60px_rgba(15,23,42,0.18)] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 sm:inset-auto sm:bottom-[88px] sm:right-6 z-[60] sm:w-[380px] w-full h-[100dvh] sm:h-[520px] sm:max-h-[72dvh] max-h-[100dvh] sm:rounded-2xl rounded-none bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] shadow-[0_20px_60px_rgba(15,23,42,0.18)] flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
           <div className="h-14 shrink-0 bg-gradient-to-r from-[#2563EB] to-[#0EA5E9] text-white flex items-center gap-3 px-4">
             <span className="w-8 h-8 rounded-full bg-white/20 grid place-items-center text-[16px]">🤖</span>
             <div className="flex-1 min-w-0">

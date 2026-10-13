@@ -28,8 +28,14 @@ export default function Home() {
   const [importMsg, setImportMsg] = useState<string|null>(null);
   const [showTambahRelawan, setShowTambahRelawan] = useState(false);
   const [showTambahKoor, setShowTambahKoor] = useState(false);
-  const [formRelawan, setFormRelawan] = useState({nama:"", wa:"", alamat:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", rtRw:"01/02", lat:"-6.9837", lng:"110.4197", segmentasi:"ojol", koordinatorId:"k1"});
-  const [formKoor, setFormKoor] = useState({nama:"", wa:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah"});
+  const [showTambahTps, setShowTambahTps] = useState(false);
+  const [editingRelawanId, setEditingRelawanId] = useState<string | null>(null);
+  const [editingKoorId, setEditingKoorId] = useState<string | null>(null);
+  const [editingTpsId, setEditingTpsId] = useState<string | null>(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [formRelawan, setFormRelawan] = useState({nama:"", wa:"", alamat:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", rtRw:"01/02", lat:"-6.9837", lng:"110.4197", segmentasi:"ojol", koordinatorId:"k1", status:"aktif" as "aktif"|"nonaktif"});
+  const [formKoor, setFormKoor] = useState({nama:"", wa:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", status:"aktif" as "aktif"|"nonaktif"});
+  const [formTps, setFormTps] = useState({noTps:"01", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", lat:"-6.9850", lng:"110.4170", dpt:"250", suaraSah:"210", suaraSitiRoika:"45", suaraPKS:"70", alamatTps:""});
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showMapLegend, setShowMapLegend] = useState(false);
   const [theme, setTheme] = useState<"light"|"dark">("light");
@@ -64,6 +70,22 @@ export default function Home() {
     try{ localStorage.setItem("sr-target-relawan", String(nextRelawan)); }catch{}
     try{ localStorage.setItem("sr-target-koor", String(nextKoor)); }catch{}
   }
+
+  // ---- Persistensi data (localStorage) agar CRUD tidak hilang saat refresh ----
+  useEffect(()=>{
+    try{
+      const rawT = localStorage.getItem("sr-tps");
+      const rawR = localStorage.getItem("sr-relawan");
+      const rawK = localStorage.getItem("sr-koor");
+      if(rawT){ const v = JSON.parse(rawT); if(Array.isArray(v) && v.length) setTpsList(v); }
+      if(rawR){ const v = JSON.parse(rawR); if(Array.isArray(v) && v.length) setRelawans(v); }
+      if(rawK){ const v = JSON.parse(rawK); if(Array.isArray(v) && v.length) setKoors(v); }
+    }catch{}
+    setDataLoaded(true);
+  },[]);
+  useEffect(()=>{ if(!dataLoaded) return; try{ localStorage.setItem("sr-tps", JSON.stringify(tpsList)); }catch{} },[tpsList, dataLoaded]);
+  useEffect(()=>{ if(!dataLoaded) return; try{ localStorage.setItem("sr-relawan", JSON.stringify(relawans)); }catch{} },[relawans, dataLoaded]);
+  useEffect(()=>{ if(!dataLoaded) return; try{ localStorage.setItem("sr-koor", JSON.stringify(koors)); }catch{} },[koors, dataLoaded]);
 
   // kelurahan bertingkat: opsi ikut kec, reset jika tidak valid
   const kelurahanOptions = useMemo(()=>{
@@ -333,44 +355,170 @@ export default function Home() {
     const a=document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
   }
 
-  function handleAddRelawan(){
-    if(!formRelawan.nama || !formRelawan.wa) return alert("Nama & WA wajib");
+  function validateWilayah(kecamatan: string, kelurahan: string): string | null {
     const kecSet = new Set(KECAMATAN.slice(1) as string[]);
-    if(!kecSet.has(formRelawan.kecamatan as any)) return alert("Kecamatan tidak valid");
-    const kels = KELURAHAN_BY_KEC[formRelawan.kecamatan] ?? [];
-    if(!kels.includes(formRelawan.kelurahan)) return alert(`Kelurahan tidak sesuai ${formRelawan.kecamatan}. Pilih dari dropdown kelurahan.`);
-    // alamat bebas, kelurahan dari dropdown bertingkat — titik peta ikut kelurahan
-    let lat = Number(formRelawan.lat), lng = Number(formRelawan.lng);
-    const latEmpty = !String(formRelawan.lat).trim(), lngEmpty = !String(formRelawan.lng).trim();
+    if(!kecSet.has(kecamatan as any)) return "Kecamatan tidak valid";
+    const kels = KELURAHAN_BY_KEC[kecamatan] ?? [];
+    if(!kels.includes(kelurahan)) return `Kelurahan tidak sesuai ${kecamatan}. Pilih dari dropdown kelurahan.`;
+    return null;
+  }
+
+  function resolveLatLng(latStr: string, lngStr: string, kelurahan: string, kecamatan: string): { lat: number; lng: number } | { error: string } {
+    let lat = Number(latStr), lng = Number(lngStr);
+    const latEmpty = !String(latStr).trim(), lngEmpty = !String(lngStr).trim();
     if(latEmpty || lngEmpty || !Number.isFinite(lat) || !Number.isFinite(lng)){
-      const c = getKelurahanCenter(formRelawan.kelurahan, formRelawan.kecamatan);
-      // jitter kecil agar tidak numpuk jika banyak di kelurahan sama
+      const c = getKelurahanCenter(kelurahan, kecamatan);
       const jitter = () => (Math.random()-0.5)*0.006; // ±0.003°
       if(latEmpty || !Number.isFinite(lat)) lat = c.lat + jitter();
       if(lngEmpty || !Number.isFinite(lng)) lng = c.lng + jitter();
     }
-    if(!Number.isFinite(lat) || lat < -11 || lat > 6) return alert("Lat tidak valid (-11..6) atau kosong — isi lat atau pilih kelurahan lain.");
-    if(!Number.isFinite(lng) || lng < 95 || lng > 141) return alert("Lng tidak valid (95..141) atau kosong — isi lng atau pilih kelurahan lain.");
-    const ko = koors.find(k=>k.id===formRelawan.koordinatorId) ?? koors[0];
-    const r: Relawan = {
-      id:`rel-${Date.now()}`, nama:formRelawan.nama, wa:formRelawan.wa.replace(/\D/g,""), alamat:formRelawan.alamat,
-      kelurahan:formRelawan.kelurahan, kecamatan:formRelawan.kecamatan, rtRw: formRelawan.rtRw,
-      lat, lng,
-      segmentasi: formRelawan.segmentasi, koordinatorId: ko.id, koordinatorNama: ko.nama, status:"aktif"
-    };
-    setRelawans(prev=>[r, ...prev]);
-    setShowTambahRelawan(false);
+    if(!Number.isFinite(lat) || lat < -11 || lat > 6) return { error: "Lat tidak valid (-11..6) atau kosong — isi lat atau pilih kelurahan lain." };
+    if(!Number.isFinite(lng) || lng < 95 || lng > 141) return { error: "Lng tidak valid (95..141) atau kosong — isi lng atau pilih kelurahan lain." };
+    return { lat, lng };
   }
-  function handleAddKoor(){
-    if(!formKoor.nama || !formKoor.wa) return alert("Nama & WA wajib");
-    const kecSet = new Set(KECAMATAN.slice(1) as string[]);
-    if(!kecSet.has(formKoor.kecamatan as any)) return alert("Kecamatan tidak valid");
-    const kels = KELURAHAN_BY_KEC[formKoor.kecamatan] ?? [];
-    if(!kels.includes(formKoor.kelurahan)) return alert(`Kelurahan tidak sesuai ${formKoor.kecamatan}. Pilih dari dropdown kelurahan.`);
-    const c = getKelurahanCenter(formKoor.kelurahan, formKoor.kecamatan);
-    const k: Koordinator = {id:`k-${Date.now()}`, nama:formKoor.nama, wa:formKoor.wa, kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, lat:c.lat, lng:c.lng, status:"aktif", jmlRelawan:0};
-    setKoors(prev=>[...prev, k]);
+
+  function resetFormRelawan(){
+    setFormRelawan({nama:"", wa:"", alamat:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", rtRw:"01/02", lat:"", lng:"", segmentasi:"ojol", koordinatorId: koors[0]?.id ?? "k1", status:"aktif"});
+    setEditingRelawanId(null);
+  }
+  function openAddRelawan(){ resetFormRelawan(); setShowTambahRelawan(true); }
+  function openEditRelawan(r: Relawan){
+    setFormRelawan({nama:r.nama, wa:r.wa, alamat:r.alamat ?? "", kelurahan:r.kelurahan, kecamatan:r.kecamatan, rtRw:r.rtRw, lat:String(r.lat), lng:String(r.lng), segmentasi:r.segmentasi, koordinatorId:r.koordinatorId, status:r.status});
+    setEditingRelawanId(r.id);
+    setShowTambahRelawan(true);
+  }
+
+  function handleSaveRelawan(){
+    if(!formRelawan.nama.trim() || !formRelawan.wa.trim()) return alert("Nama & WA wajib");
+    if(!formRelawan.wa.replace(/\D/g,"").startsWith("62")) return alert("WA harus format +62 (mis. 62812...)");
+    const wErr = validateWilayah(formRelawan.kecamatan, formRelawan.kelurahan);
+    if(wErr) return alert(wErr);
+    const ll = resolveLatLng(formRelawan.lat, formRelawan.lng, formRelawan.kelurahan, formRelawan.kecamatan);
+    if("error" in ll) return alert(ll.error);
+    const ko = koors.find(k=>k.id===formRelawan.koordinatorId) ?? koors[0];
+    if(!ko) return alert("Belum ada koordinator — tambah koordinator dulu.");
+    if(editingRelawanId){
+      setRelawans(prev=> prev.map(r=> r.id===editingRelawanId ? {
+        ...r, nama:formRelawan.nama.trim(), wa:formRelawan.wa.replace(/\D/g,""), alamat:formRelawan.alamat,
+        kelurahan:formRelawan.kelurahan, kecamatan:formRelawan.kecamatan, rtRw:formRelawan.rtRw,
+        lat:ll.lat, lng:ll.lng, segmentasi:formRelawan.segmentasi,
+        koordinatorId:ko.id, koordinatorNama:ko.nama, status:formRelawan.status,
+      } : r));
+      setImportMsg(`Relawan "${formRelawan.nama.trim()}" diperbarui.`);
+    } else {
+      const r: Relawan = {
+        id:`rel-${Date.now()}`, nama:formRelawan.nama.trim(), wa:formRelawan.wa.replace(/\D/g,""), alamat:formRelawan.alamat,
+        kelurahan:formRelawan.kelurahan, kecamatan:formRelawan.kecamatan, rtRw: formRelawan.rtRw,
+        lat:ll.lat, lng:ll.lng,
+        segmentasi: formRelawan.segmentasi, koordinatorId: ko.id, koordinatorNama: ko.nama, status:formRelawan.status,
+      };
+      setRelawans(prev=>[r, ...prev]);
+      setImportMsg(`Relawan "${r.nama}" ditambahkan ke ${r.kelurahan}, ${r.kecamatan}.`);
+    }
+    setShowTambahRelawan(false);
+    setEditingRelawanId(null);
+  }
+  function handleDeleteRelawan(id: string){
+    const r = relawans.find(x=>x.id===id);
+    if(!r) return;
+    if(!confirm(`Hapus relawan "${r.nama}" (${r.kelurahan})? Data tidak bisa dikembalikan.`)) return;
+    setRelawans(prev=> prev.filter(x=>x.id!==id));
+    setImportMsg(`Relawan "${r.nama}" dihapus.`);
+  }
+  function toggleRelawanStatus(id: string){
+    setRelawans(prev=> prev.map(r=> r.id===id ? {...r, status: r.status==="aktif" ? "nonaktif" : "aktif"} : r));
+  }
+
+  function resetFormKoor(){
+    setFormKoor({nama:"", wa:"", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", status:"aktif"});
+    setEditingKoorId(null);
+  }
+  function openAddKoor(){ resetFormKoor(); setShowTambahKoor(true); }
+  function openEditKoor(k: Koordinator){
+    setFormKoor({nama:k.nama, wa:k.wa, kelurahan:k.kelurahan, kecamatan:k.kecamatan, status:k.status});
+    setEditingKoorId(k.id);
+    setShowTambahKoor(true);
+  }
+  function handleSaveKoor(){
+    if(!formKoor.nama.trim() || !formKoor.wa.trim()) return alert("Nama & WA wajib");
+    const wErr = validateWilayah(formKoor.kecamatan, formKoor.kelurahan);
+    if(wErr) return alert(wErr);
+    if(editingKoorId){
+      setKoors(prev=> prev.map(k=> k.id===editingKoorId ? {...k, nama:formKoor.nama.trim(), wa:formKoor.wa.replace(/\D/g,""), kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, status:formKoor.status} : k));
+      // nama koordinator berubah → ikutkan ke relawan binaannya
+      const koName = formKoor.nama.trim();
+      setRelawans(prev=> prev.map(r=> r.koordinatorId===editingKoorId ? {...r, koordinatorNama:koName} : r));
+      setImportMsg(`Koordinator "${koName}" diperbarui.`);
+    } else {
+      const c = getKelurahanCenter(formKoor.kelurahan, formKoor.kecamatan);
+      const k: Koordinator = {id:`k-${Date.now()}`, nama:formKoor.nama.trim(), wa:formKoor.wa.replace(/\D/g,""), kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, lat:c.lat, lng:c.lng, status:formKoor.status, jmlRelawan:0};
+      setKoors(prev=>[...prev, k]);
+      setImportMsg(`Koordinator "${k.nama}" ditambahkan.`);
+    }
     setShowTambahKoor(false);
+    setEditingKoorId(null);
+  }
+  function handleDeleteKoor(id: string){
+    const k = koors.find(x=>x.id===id);
+    if(!k) return;
+    const binaan = relawans.filter(r=>r.koordinatorId===id && r.status==="aktif").length;
+    if(binaan>0) return alert(`Tidak bisa hapus: ${k.nama} masih membina ${binaan} relawan aktif. Pindahkan/nonaktifkan relawan dulu.`);
+    if(!confirm(`Hapus koordinator "${k.nama}"?`)) return;
+    setKoors(prev=> prev.filter(x=>x.id!==id));
+    setImportMsg(`Koordinator "${k.nama}" dihapus.`);
+  }
+  function toggleKoorStatus(id: string){
+    setKoors(prev=> prev.map(k=> k.id===id ? {...k, status: k.status==="aktif" ? "nonaktif" : "aktif"} : k));
+  }
+
+  function resetFormTps(){
+    setFormTps({noTps:"01", kelurahan:"Pekunden", kecamatan:"Semarang Tengah", lat:"", lng:"", dpt:"250", suaraSah:"210", suaraSitiRoika:"45", suaraPKS:"70", alamatTps:""});
+    setEditingTpsId(null);
+  }
+  function openAddTps(){ resetFormTps(); setShowTambahTps(true); }
+  function openEditTps(t: TPS){
+    setFormTps({noTps:t.noTps, kelurahan:t.kelurahan, kecamatan:t.kecamatan, lat:String(t.lat), lng:String(t.lng), dpt:String(t.dpt), suaraSah:String(t.suaraSah), suaraSitiRoika:String(t.suaraSitiRoika), suaraPKS:String(t.suaraPKS), alamatTps:t.alamatTps ?? ""});
+    setEditingTpsId(t.id);
+    setShowTambahTps(true);
+  }
+  function handleSaveTps(){
+    const noTps = String(formTps.noTps).padStart(2,"0");
+    const wErr = validateWilayah(formTps.kecamatan, formTps.kelurahan);
+    if(wErr) return alert(wErr);
+    const ll = resolveLatLng(formTps.lat, formTps.lng, formTps.kelurahan, formTps.kecamatan);
+    if("error" in ll) return alert(ll.error);
+    const dpt = Number(formTps.dpt), sah = Number(formTps.suaraSah), sr = Number(formTps.suaraSitiRoika), pks = Number(formTps.suaraPKS);
+    if(!(dpt>0)) return alert("DPT harus > 0");
+    if(!(sah>=0) || sah>dpt) return alert("Suara sah harus 0..DPT");
+    if(sr>sah) return alert("Suara SR tidak boleh > suara sah");
+    if(pks>sah) return alert("Suara PKS tidak boleh > suara sah");
+    const dupe = tpsList.some(t=> t.id!==editingTpsId && t.noTps===noTps && t.kelurahan.toLowerCase()===formTps.kelurahan.toLowerCase());
+    if(dupe) return alert(`TPS ${noTps} duplikat di ${formTps.kelurahan}`);
+    if(editingTpsId){
+      setTpsList(prev=> prev.map(t=> t.id===editingTpsId ? {...t, noTps, kelurahan:formTps.kelurahan, kecamatan:formTps.kecamatan, lat:ll.lat, lng:ll.lng, dpt, suaraSah:sah, suaraSitiRoika:sr, suaraPKS:pks, alamatTps:formTps.alamatTps} : t));
+      setImportMsg(`TPS ${noTps} ${formTps.kelurahan} diperbarui.`);
+    } else {
+      const t: TPS = {id:`tps-${Date.now()}`, noTps, kelurahan:formTps.kelurahan, kecamatan:formTps.kecamatan, lat:ll.lat, lng:ll.lng, dpt, suaraSah:sah, suaraSitiRoika:sr, suaraPKS:pks, alamatTps:formTps.alamatTps};
+      setTpsList(prev=>[t, ...prev]);
+      setImportMsg(`TPS ${noTps} ${t.kelurahan} ditambahkan.`);
+    }
+    setShowTambahTps(false);
+    setEditingTpsId(null);
+  }
+  function handleDeleteTps(id: string){
+    const t = tpsList.find(x=>x.id===id);
+    if(!t) return;
+    if(!confirm(`Hapus TPS ${t.noTps} ${t.kelurahan}?`)) return;
+    setTpsList(prev=> prev.filter(x=>x.id!==id));
+    setImportMsg(`TPS ${t.noTps} ${t.kelurahan} dihapus.`);
+  }
+  function resetAllData(){
+    if(!confirm("Reset semua data ke bawaan (seed)? Perubahan CRUD + import akan hilang.")) return;
+    setTpsList([...TPS_SEED]);
+    setRelawans([...RELAWAN_SEED]);
+    setKoors(KOORDINATORS.map(k=>({...k, jmlRelawan: RELAWAN_SEED.filter(r=>r.koordinatorId===k.id && r.status==="aktif").length})));
+    try{ localStorage.removeItem("sr-tps"); localStorage.removeItem("sr-relawan"); localStorage.removeItem("sr-koor"); }catch{}
+    setImportMsg("Data direset ke bawaan.");
   }
 
   const donutData = [
@@ -900,7 +1048,7 @@ export default function Home() {
                   <select value={kel} onChange={e=> setKel(e.target.value)} disabled={kec==="Semua kecamatan"} title={kec==="Semua kecamatan" ? "Pilih kecamatan dulu" : "Pilih kelurahan"} className="w-full sm:w-auto bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[13px] disabled:opacity-50 disabled:cursor-not-allowed sm:min-w-[150px]">
                     {kelurahanOptions.map(k=> <option key={k} value={k}>{k}</option>)}
                   </select>
-                  <button type="button" onClick={()=> setShowTambahKoor(true)} className="col-span-2 sm:col-span-1 bg-[#2563EB] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow min-h-[40px]">+ Tambah Koordinator</button>
+                  <button type="button" onClick={openAddKoor} className="col-span-2 sm:col-span-1 bg-[#2563EB] text-white rounded-full px-4 py-2 text-[13px] font-bold shadow min-h-[40px]">+ Tambah Koordinator</button>
                 </div>
               </div>
               <div className="rounded-xl border border-[#E2E8F0] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 flex flex-col sm:flex-row sm:items-center gap-3">
@@ -918,8 +1066,8 @@ export default function Home() {
               </div>
               <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
                 <div className="overflow-auto rounded-xl border border-[#E2E8F0] dark:border-[#334155]">
-                  <table className="w-full text-[13px] min-w-[560px]">
-                  <thead className="text-[#64748B] bg-[#F8FAFC] dark:bg-[#0F172A]"><tr><th className="text-left py-2.5 px-3">Nama</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-right px-2">Relawan</th><th className="text-left pl-3">Status</th></tr></thead>
+                  <table className="w-full text-[13px] min-w-[680px]">
+                  <thead className="text-[#64748B] bg-[#F8FAFC] dark:bg-[#0F172A]"><tr><th className="text-left py-2.5 px-3">Nama</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-right px-2">Relawan</th><th className="text-left pl-3">Status</th><th className="text-right pr-3">Aksi</th></tr></thead>
                   <tbody>
                     {(kec==="Semua kecamatan"? koors: koors.filter(k=>k.kecamatan===kec)).map(k=>(
                       <tr key={k.id} className="border-t border-[#F1F5F9] dark:border-[#0F172A] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A]">
@@ -927,7 +1075,11 @@ export default function Home() {
                         <td className="text-[#64748B]">{k.kelurahan}, {k.kecamatan}</td>
                         <td className="font-mono text-[#94A3AF] text-[12px]">{k.wa.replace(/(\d{4})$/, "****")}</td>
                         <td className="text-right tabular-nums px-2 font-bold">{relawans.filter(r=> r.koordinatorId===k.id && r.status==="aktif").length}</td>
-                        <td className="pl-3 py-2"><span className={`text-[11px] px-2.5 py-1 rounded-full border font-bold ${k.status==="aktif"?"bg-emerald-50 border-emerald-200 text-emerald-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>{k.status}</span></td>
+                        <td className="pl-3 py-2"><button title="Klik untuk aktif/nonaktif" onClick={()=>toggleKoorStatus(k.id)} className={`text-[11px] px-2.5 py-1 rounded-full border font-bold ${k.status==="aktif"?"bg-emerald-50 border-emerald-200 text-emerald-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>{k.status}</button></td>
+                        <td className="pr-3 py-2 text-right whitespace-nowrap">
+                          <button onClick={()=>openEditKoor(k)} className="text-[11px] font-bold text-[#2563EB] bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] rounded-full px-3 py-1 mr-1.5">Edit</button>
+                          <button onClick={()=>handleDeleteKoor(k.id)} className="text-[11px] font-bold text-[#DC2626] bg-[#FEF2F2] dark:bg-[#0F172A] border border-[#FECACA] dark:border-[#334155] rounded-full px-3 py-1">Hapus</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -935,17 +1087,24 @@ export default function Home() {
                 </div>
               </div>
               {showTambahKoor && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>setShowTambahKoor(false)}>
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>{setShowTambahKoor(false); setEditingKoorId(null);}}>
                   <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-md space-y-3 shadow-xl border border-[#E2E8F0] dark:border-[#334155] max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
-                    <div className="font-bold text-[#0F172A] dark:text-white">Tambah Koordinator</div>
+                    <div className="font-bold text-[#0F172A] dark:text-white">{editingKoorId ? "Edit Koordinator" : "Tambah Koordinator"}</div>
                     <input placeholder="Nama lengkap" value={formKoor.nama} onChange={e=>setFormKoor({...formKoor, nama:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
                     <input placeholder="WA +62..." value={formKoor.wa} onChange={e=>setFormKoor({...formKoor, wa:e.target.value})} className="w-full border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white outline-none" />
                     <div className="grid grid-cols-2 gap-2">
                       <select value={formKoor.kecamatan} onChange={e=>{ const kecVal=e.target.value; const kels=KELURAHAN_BY_KEC[kecVal]??[]; const keepKel = kels.includes(formKoor.kelurahan) ? formKoor.kelurahan : (kels[0]??""); setFormKoor(prev=>({...prev, kecamatan:kecVal, kelurahan: keepKel})); }} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}</select>
                       <select value={formKoor.kelurahan} onChange={e=>setFormKoor({...formKoor, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">{(KELURAHAN_BY_KEC[formKoor.kecamatan] ?? []).map(k=> <option key={k} value={k}>{k}</option>)}</select>
                     </div>
+                    <label className="flex items-center gap-2 text-[13px] text-[#334155] dark:text-[#CBD5E1]">
+                      <span className="font-semibold">Status</span>
+                      <select value={formKoor.status} onChange={e=>setFormKoor({...formKoor, status:e.target.value as "aktif"|"nonaktif"})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        <option value="aktif">aktif</option>
+                        <option value="nonaktif">nonaktif</option>
+                      </select>
+                    </label>
                     <p className="text-[11px] text-[#94A3AF]">Pilih kecamatan → dropdown kelurahan di sebelahnya ikut. Titik peta koordinator ikut kelurahan.</p>
-                    <div className="flex justify-end gap-2"><button onClick={()=>setShowTambahKoor(false)} className="px-4 py-2 text-[13px] font-medium text-[#64748B]">Batal</button><button onClick={handleAddKoor} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
+                    <div className="flex justify-end gap-2"><button onClick={()=>{setShowTambahKoor(false); setEditingKoorId(null);}} className="px-4 py-2 text-[13px] font-medium text-[#64748B]">Batal</button><button onClick={handleSaveKoor} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
                   </div>
                 </div>
               )}
@@ -982,7 +1141,7 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <label className="text-[13px] bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 font-bold cursor-pointer shadow">Import Excel/CSV <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportRelawan} /></label>
                 <button onClick={()=> exportCSV("relawan.csv", filteredRelawans.map(r=>({nama:r.nama, wa:r.wa, kelurahan:r.kelurahan, kecamatan:r.kecamatan, rt_rw:r.rtRw, lat:r.lat, lng:r.lng, segmentasi:r.segmentasi, koordinator:r.koordinatorNama, status:r.status})), ["nama","wa","kelurahan","kecamatan","rt_rw","lat","lng","segmentasi","koordinator","status"])} className="text-[13px] bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 font-bold">Export CSV</button>
-                <button onClick={()=> setShowTambahRelawan(true)} className="text-[13px] bg-[#2563EB] text-white rounded-full px-4 py-2 font-bold shadow">+ Tambah Relawan</button>
+                <button onClick={openAddRelawan} className="text-[13px] bg-[#2563EB] text-white rounded-full px-4 py-2 font-bold shadow">+ Tambah Relawan</button>
                 <a href="/templates/template_relawan.csv" download className="text-[12px] underline text-[#64748B] py-2">Download template</a>
               </div>
               {(filterSeg!=="semua" || filterKoor!=="semua" || searchRelawan || searchTop) && (
@@ -993,8 +1152,8 @@ export default function Home() {
               )}
               <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
                 <div className="overflow-auto max-h-[560px] border border-[#E2E8F0] dark:border-[#334155] rounded-xl">
-                  <table className="w-full text-[13px] min-w-[680px]">
-                  <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">Nama</th><th className="text-left">Segmentasi</th><th className="text-left">Koordinator</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-left">Status</th></tr></thead>
+                  <table className="w-full text-[13px] min-w-[760px]">
+                  <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">Nama</th><th className="text-left">Segmentasi</th><th className="text-left">Koordinator</th><th className="text-left">Wilayah</th><th className="text-left">WA</th><th className="text-left">Status</th><th className="text-right pr-3">Aksi</th></tr></thead>
                   <tbody>
                     {filteredRelawans.map(r=>{
                       const seg=segBySlug(r.segmentasi);
@@ -1005,20 +1164,24 @@ export default function Home() {
                           <td className="whitespace-nowrap text-[#334155] dark:text-[#CBD5E1]">{r.koordinatorNama}</td>
                           <td className="whitespace-nowrap text-[#64748B] text-[12px]">{r.kelurahan}, {r.kecamatan}<div className="text-[#94A3AF] text-[11px]">{r.rtRw} · {r.lat.toFixed(3)}, {r.lng.toFixed(3)}</div></td>
                           <td className="font-mono text-[#94A3AF] text-[12px]">{r.wa.replace(/(\d{4})$/, "****")}</td>
-                          <td><span className={`px-2.5 py-1 rounded-full border text-[11px] font-bold ${r.status==="aktif"?"bg-emerald-50 border-emerald-200 text-emerald-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>{r.status}</span></td>
+                          <td><button title="Klik untuk aktif/nonaktif" onClick={()=>toggleRelawanStatus(r.id)} className={`px-2.5 py-1 rounded-full border text-[11px] font-bold ${r.status==="aktif"?"bg-emerald-50 border-emerald-200 text-emerald-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>{r.status}</button></td>
+                          <td className="pr-3 text-right whitespace-nowrap">
+                            <button onClick={()=>openEditRelawan(r)} className="text-[11px] font-bold text-[#2563EB] bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] rounded-full px-3 py-1 mr-1.5">Edit</button>
+                            <button onClick={()=>handleDeleteRelawan(r.id)} className="text-[11px] font-bold text-[#DC2626] bg-[#FEF2F2] dark:bg-[#0F172A] border border-[#FECACA] dark:border-[#334155] rounded-full px-3 py-1">Hapus</button>
+                          </td>
                         </tr>
                       )
                     })}
-                    {filteredRelawans.length===0 && <tr><td colSpan={6} className="py-10 text-center text-[#94A3AF]">Tidak ada relawan sesuai filter. Klik Reset filter.</td></tr>}
+                    {filteredRelawans.length===0 && <tr><td colSpan={7} className="py-10 text-center text-[#94A3AF]">Tidak ada relawan sesuai filter. Klik Reset filter.</td></tr>}
                   </tbody>
                   </table>
                 </div>
               </div>
               <div className="text-[12px] text-[#64748B] text-center">Menampilkan semua {filteredRelawans.length} relawan dari {relawans.length} — scroll untuk lihat ↓</div>
               {showTambahRelawan && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>setShowTambahRelawan(false)}>
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>{setShowTambahRelawan(false); setEditingRelawanId(null);}}>
                   <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-lg space-y-3 max-h-[92vh] overflow-auto shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
-                    <div className="font-bold text-[#0F172A] dark:text-white">Tambah Relawan</div>
+                    <div className="font-bold text-[#0F172A] dark:text-white">{editingRelawanId ? "Edit Relawan" : "Tambah Relawan"}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input placeholder="Nama lengkap" value={formRelawan.nama} onChange={e=>setFormRelawan({...formRelawan, nama:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] sm:col-span-2 bg-white dark:bg-[#0F172A] dark:text-white outline-none min-h-[44px]" />
                       <input placeholder="WA 628..." value={formRelawan.wa} onChange={e=>setFormRelawan({...formRelawan, wa:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
@@ -1032,11 +1195,15 @@ export default function Home() {
                         {(KELURAHAN_BY_KEC[formRelawan.kecamatan] ?? []).map(k=> <option key={k} value={k}>{k}</option>)}
                       </select>
                       <input placeholder="RT/RW 01/02" value={formRelawan.rtRw} onChange={e=>setFormRelawan({...formRelawan, rtRw:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <select value={formRelawan.status} onChange={e=>setFormRelawan({...formRelawan, status:e.target.value as "aktif"|"nonaktif"})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        <option value="aktif">aktif</option>
+                        <option value="nonaktif">nonaktif</option>
+                      </select>
                       <input placeholder="Lat -6.98" value={formRelawan.lat} onChange={e=>setFormRelawan({...formRelawan, lat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                       <input placeholder="Lng 110.42" value={formRelawan.lng} onChange={e=>setFormRelawan({...formRelawan, lng:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
                     </div>
                     <p className="text-[11px] text-[#94A3AF]">Pilih kecamatan → dropdown kelurahan di sebelahnya ikut. Alamat bebas (mis. Jl. Pemuda No. 10). Kelurahan menentukan titik peta — lat/lng otomatis diisi jika kosong; bisa edit manual.</p>
-                    <div className="flex justify-end gap-2"><button onClick={()=>setShowTambahRelawan(false)} className="px-4 py-2 text-[13px] text-[#64748B]">Batal</button><button onClick={handleAddRelawan} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
+                    <div className="flex justify-end gap-2"><button onClick={()=>{setShowTambahRelawan(false); setEditingRelawanId(null);}} className="px-4 py-2 text-[13px] text-[#64748B]">Batal</button><button onClick={handleSaveRelawan} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
                   </div>
                 </div>
               )}
@@ -1058,25 +1225,56 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <label className="text-[13px] bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 font-bold cursor-pointer shadow">Unggah Excel/CSV <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportTPS} /></label>
                 <button onClick={()=> exportCSV("data-tps.csv", filteredTps.map(t=>({no_tps:t.noTps, kelurahan:t.kelurahan, kecamatan:t.kecamatan, lat:t.lat, lng:t.lng, dpt:t.dpt, suara_sah:t.suaraSah, suara_siti_roika:t.suaraSitiRoika, suara_pks:t.suaraPKS})), ["no_tps","kelurahan","kecamatan","lat","lng","dpt","suara_sah","suara_siti_roika","suara_pks"])} className="text-[13px] bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 font-bold dark:text-white">Export CSV</button>
+                <button onClick={openAddTps} className="text-[13px] bg-[#2563EB] text-white rounded-full px-4 py-2 font-bold shadow">+ Tambah TPS</button>
+                <button onClick={resetAllData} title="Kembalikan ke data bawaan" className="text-[12px] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[#64748B]">Reset data</button>
                 <a href="/templates/template_data_tps.csv" download className="text-[12px] underline text-[#64748B] py-2">Download template</a>
               </div>
               <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
               <div className="overflow-auto max-h-[520px] border border-[#E2E8F0] dark:border-[#334155] rounded-xl">
-                <table className="w-full text-[13px] min-w-[760px]">
-                  <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">TPS</th><th className="text-left">Kelurahan</th><th className="text-left">Kecamatan</th><th className="text-right px-2">DPT</th><th className="text-right px-2">Sah</th><th className="text-right px-2">SR</th><th className="text-right px-2">PKS</th><th className="text-left pl-2">Koordinat</th></tr></thead>
+                <table className="w-full text-[13px] min-w-[860px]">
+                  <thead className="sticky top-0 bg-[#F8FAFC] dark:bg-[#0F172A] text-[#64748B]"><tr><th className="text-left p-2.5 px-3">TPS</th><th className="text-left">Kelurahan</th><th className="text-left">Kecamatan</th><th className="text-right px-2">DPT</th><th className="text-right px-2">Sah</th><th className="text-right px-2">SR</th><th className="text-right px-2">PKS</th><th className="text-left pl-2">Koordinat</th><th className="text-right pr-3">Aksi</th></tr></thead>
                   <tbody>
                     {filteredTps.map(t=>(
                       <tr key={t.id} className="border-t border-[#F1F5F9] dark:border-[#0F172A] hover:bg-[#F8FAFC] dark:hover:bg-[#0F172A]">
                         <td className="p-2.5 px-3 font-mono font-bold">{t.noTps}</td><td className="font-medium text-[#0F172A] dark:text-white">{t.kelurahan}</td><td className="text-[#64748B]">{t.kecamatan}</td>
                         <td className="text-right tabular-nums px-2">{t.dpt}</td><td className="text-right tabular-nums px-2">{t.suaraSah}</td><td className="text-right tabular-nums font-bold text-[#2563EB] px-2">{t.suaraSitiRoika}</td><td className="text-right tabular-nums px-2">{t.suaraPKS}</td>
                         <td className="pl-2 font-mono text-[#94A3AF] text-[11px]">{t.lat.toFixed(4)}, {t.lng.toFixed(4)}</td>
+                        <td className="pr-3 text-right whitespace-nowrap">
+                          <button onClick={()=>openEditTps(t)} className="text-[11px] font-bold text-[#2563EB] bg-[#EFF6FF] dark:bg-[#0F172A] border border-[#DBEAFE] dark:border-[#334155] rounded-full px-3 py-1 mr-1.5">Edit</button>
+                          <button onClick={()=>handleDeleteTps(t.id)} className="text-[11px] font-bold text-[#DC2626] bg-[#FEF2F2] dark:bg-[#0F172A] border border-[#FECACA] dark:border-[#334155] rounded-full px-3 py-1">Hapus</button>
+                        </td>
                       </tr>
                     ))}
-                    {filteredTps.length===0 && <tr><td colSpan={8} className="py-10 text-center text-[#94A3AF]">Belum ada data TPS.</td></tr>}
+                    {filteredTps.length===0 && <tr><td colSpan={9} className="py-10 text-center text-[#94A3AF]">Belum ada data TPS.</td></tr>}
                   </tbody>
                 </table>
               </div>
               </div>
+              {showTambahTps && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" onClick={()=>{setShowTambahTps(false); setEditingTpsId(null);}}>
+                  <div className="bg-white dark:bg-[#1E293B] rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 w-full max-w-lg space-y-3 max-h-[92vh] overflow-auto shadow-xl border border-[#E2E8F0] dark:border-[#334155]" onClick={e=>e.stopPropagation()}>
+                    <div className="font-bold text-[#0F172A] dark:text-white">{editingTpsId ? "Edit TPS" : "Tambah TPS"}</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="No TPS (01)" value={formTps.noTps} onChange={e=>setFormTps({...formTps, noTps:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input placeholder="Alamat TPS" value={formTps.alamatTps} onChange={e=>setFormTps({...formTps, alamatTps:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <select value={formTps.kecamatan} onChange={e=>{ const kecVal=e.target.value; const kels=KELURAHAN_BY_KEC[kecVal]??[]; const keepKel = kels.includes(formTps.kelurahan) ? formTps.kelurahan : (kels[0]??""); setFormTps(prev=>({...prev, kecamatan:kecVal, kelurahan: keepKel})); }} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        {KECAMATAN.slice(1).map(k=> <option key={k} value={k}>{k}</option>)}
+                      </select>
+                      <select value={formTps.kelurahan} onChange={e=>setFormTps({...formTps, kelurahan:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white">
+                        {(KELURAHAN_BY_KEC[formTps.kecamatan] ?? []).map(k=> <option key={k} value={k}>{k}</option>)}
+                      </select>
+                      <input type="number" min={1} placeholder="DPT" value={formTps.dpt} onChange={e=>setFormTps({...formTps, dpt:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input type="number" min={0} placeholder="Suara sah" value={formTps.suaraSah} onChange={e=>setFormTps({...formTps, suaraSah:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input type="number" min={0} placeholder="Suara SR" value={formTps.suaraSitiRoika} onChange={e=>setFormTps({...formTps, suaraSitiRoika:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input type="number" min={0} placeholder="Suara PKS" value={formTps.suaraPKS} onChange={e=>setFormTps({...formTps, suaraPKS:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input placeholder="Lat (kosong = ikut kelurahan)" value={formTps.lat} onChange={e=>setFormTps({...formTps, lat:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                      <input placeholder="Lng (kosong = ikut kelurahan)" value={formTps.lng} onChange={e=>setFormTps({...formTps, lng:e.target.value})} className="border border-[#E2E8F0] dark:border-[#334155] rounded-xl px-3 py-2.5 text-[13px] bg-white dark:bg-[#0F172A] dark:text-white" />
+                    </div>
+                    <p className="text-[11px] text-[#94A3AF]">Aturan: suara sah ≤ DPT, SR/PKS ≤ sah, no TPS unik per kelurahan.</p>
+                    <div className="flex justify-end gap-2"><button onClick={()=>{setShowTambahTps(false); setEditingTpsId(null);}} className="px-4 py-2 text-[13px] text-[#64748B]">Batal</button><button onClick={handleSaveTps} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button></div>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 

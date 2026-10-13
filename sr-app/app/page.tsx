@@ -9,6 +9,7 @@ import { blankSpot, rekapByKecamatan, rekapByKelurahan } from "@/lib/geo";
 import { TARGET_RELAWAN_DEFAULT, TARGET_KOOR_DEFAULT, calcProgress, formatPct } from "@/lib/target";
 import ChatBot from "@/components/ChatBot";
 import { ToastStack, type Toast, type ToastKind } from "@/components/Toasts";
+import { ConfirmDialog, type PendingAction } from "@/components/ConfirmDialog";
 
 export default function Home() {
   const [tab, setTab] = useState<TabKey>("peta");
@@ -71,6 +72,7 @@ export default function Home() {
   const [showTambahRelawan, setShowTambahRelawan] = useState(false);
   const [showTambahKoor, setShowTambahKoor] = useState(false);
   const [showTambahTps, setShowTambahTps] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [editingRelawanId, setEditingRelawanId] = useState<string | null>(null);
   const [editingKoorId, setEditingKoorId] = useState<string | null>(null);
   const [editingTpsId, setEditingTpsId] = useState<string | null>(null);
@@ -302,7 +304,7 @@ export default function Home() {
       const pages: number = (doc as any).internal.getNumberOfPages();
       for(let i=1;i<=pages;i++){ doc.setPage(i); doc.setFontSize(6); doc.setTextColor(148); doc.setFont("helvetica","normal"); doc.text(`Relawan SR — Dapil 1 Kota Semarang · Dicetak ${tgl} ${jam} · Hal ${i}/${pages}`, 14, 200); }
       doc.save(`Laporan-Dapil1-${scope.replace(/[^a-zA-Z0-9]+/g,"-")}-${now.toISOString().slice(0,10)}.pdf`);
-    }catch(e:any){ alert("Gagal export PDF: "+(e?.message||e)); }
+    }catch(e:any){ pushToast("error", "Gagal export PDF", String(e?.message||e)); }
     finally{ setExportingPdf(false); }
   }
   function exportRekapCsv(){
@@ -431,14 +433,14 @@ export default function Home() {
   }
 
   function handleSaveRelawan(){
-    if(!formRelawan.nama.trim() || !formRelawan.wa.trim()) return alert("Nama & WA wajib");
-    if(!formRelawan.wa.replace(/\D/g,"").startsWith("62")) return alert("WA harus format +62 (mis. 62812...)");
+    if(!formRelawan.nama.trim() || !formRelawan.wa.trim()){ pushToast("error", "Nama & WA wajib diisi."); return; }
+    if(!formRelawan.wa.replace(/\D/g,"").startsWith("62")){ pushToast("error", "WA harus format +62", "Contoh: 62812..."); return; }
     const wErr = validateWilayah(formRelawan.kecamatan, formRelawan.kelurahan);
-    if(wErr) return alert(wErr);
+    if(wErr){ pushToast("error", wErr); return; }
     const ll = resolveLatLng(formRelawan.lat, formRelawan.lng, formRelawan.kelurahan, formRelawan.kecamatan);
-    if("error" in ll) return alert(ll.error);
+    if("error" in ll){ pushToast("error", ll.error); return; }
     const ko = koors.find(k=>k.id===formRelawan.koordinatorId) ?? koors[0];
-    if(!ko) return alert("Belum ada koordinator — tambah koordinator dulu.");
+    if(!ko){ pushToast("warning", "Belum ada koordinator", "Tambah koordinator dulu sebelum tambah relawan."); return; }
     if(editingRelawanId){
       setRelawans(prev=> prev.map(r=> r.id===editingRelawanId ? {
         ...r, nama:formRelawan.nama.trim(), wa:formRelawan.wa.replace(/\D/g,""), alamat:formRelawan.alamat,
@@ -463,7 +465,16 @@ export default function Home() {
   function handleDeleteRelawan(id: string){
     const r = relawans.find(x=>x.id===id);
     if(!r) return;
-    if(!confirm(`Hapus relawan "${r.nama}" (${r.kelurahan})? Data tidak bisa dikembalikan.`)) return;
+    setPending({
+      kind: "relawan", id,
+      heading: "Hapus relawan ini?",
+      desc: "Data yang dihapus tidak bisa dikembalikan. Pastikan kamu yakin sebelum lanjut.",
+      chips: [`👤 ${r.nama}`, `📍 ${r.kelurahan}, ${r.kecamatan} · ${r.koordinatorNama}`],
+    });
+  }
+  function execDeleteRelawan(id: string){
+    const r = relawans.find(x=>x.id===id);
+    if(!r) return;
     setRelawans(prev=> prev.filter(x=>x.id!==id));
     setImportMsg(`Relawan "${r.nama}" dihapus.`);
   }
@@ -482,9 +493,9 @@ export default function Home() {
     setShowTambahKoor(true);
   }
   function handleSaveKoor(){
-    if(!formKoor.nama.trim() || !formKoor.wa.trim()) return alert("Nama & WA wajib");
+    if(!formKoor.nama.trim() || !formKoor.wa.trim()){ pushToast("error", "Nama & WA wajib diisi."); return; }
     const wErr = validateWilayah(formKoor.kecamatan, formKoor.kelurahan);
-    if(wErr) return alert(wErr);
+    if(wErr){ pushToast("error", wErr); return; }
     if(editingKoorId){
       setKoors(prev=> prev.map(k=> k.id===editingKoorId ? {...k, nama:formKoor.nama.trim(), wa:formKoor.wa.replace(/\D/g,""), kecamatan:formKoor.kecamatan, kelurahan:formKoor.kelurahan, status:formKoor.status} : k));
       // nama koordinator berubah → ikutkan ke relawan binaannya
@@ -504,10 +515,40 @@ export default function Home() {
     const k = koors.find(x=>x.id===id);
     if(!k) return;
     const binaan = relawans.filter(r=>r.koordinatorId===id && r.status==="aktif").length;
-    if(binaan>0) return alert(`Tidak bisa hapus: ${k.nama} masih membina ${binaan} relawan aktif. Pindahkan/nonaktifkan relawan dulu.`);
-    if(!confirm(`Hapus koordinator "${k.nama}"?`)) return;
-    setKoors(prev=> prev.filter(x=>x.id!==id));
-    setImportMsg(`Koordinator "${k.nama}" dihapus.`);
+    if(binaan>0){ pushToast("error", `Tidak bisa hapus ${k.nama}`, `Masih membina ${binaan} relawan aktif. Pindahkan / nonaktifkan dulu.`); return; }
+    setPending({
+      kind: "koor", id,
+      heading: "Hapus koordinator ini?",
+      desc: "Koordinator akan dihapus permanen dari daftar. Tindakan ini tidak bisa dibatalkan.",
+      chips: [`👥 ${k.nama}`, `📍 ${k.kelurahan}, ${k.kecamatan}`],
+    });
+  }
+  function execPending(){
+    if(!pending) return;
+    const p = pending;
+    setPending(null);
+    if(p.kind === "relawan" && p.id){ execDeleteRelawan(p.id); return; }
+    if(p.kind === "koor" && p.id){
+      const k = koors.find(x=>x.id===p.id);
+      if(!k) return;
+      setKoors(prev=> prev.filter(x=>x.id!==p.id));
+      setImportMsg(`Koordinator "${k.nama}" dihapus.`);
+      return;
+    }
+    if(p.kind === "tps" && p.id){
+      const t = tpsList.find(x=>x.id===p.id);
+      if(!t) return;
+      setTpsList(prev=> prev.filter(x=>x.id!==p.id));
+      setImportMsg(`TPS ${t.noTps} ${t.kelurahan} dihapus.`);
+      return;
+    }
+    if(p.kind === "reset"){
+      setTpsList([...TPS_SEED]);
+      setRelawans([...RELAWAN_SEED]);
+      setKoors(KOORDINATORS.map(k=>({...k, jmlRelawan: RELAWAN_SEED.filter(r=>r.koordinatorId===k.id && r.status==="aktif").length})));
+      try{ localStorage.removeItem("sr-tps"); localStorage.removeItem("sr-relawan"); localStorage.removeItem("sr-koor"); }catch{}
+      setImportMsg("Data direset ke bawaan.");
+    }
   }
   function toggleKoorStatus(id: string){
     setKoors(prev=> prev.map(k=> k.id===id ? {...k, status: k.status==="aktif" ? "nonaktif" : "aktif"} : k));
@@ -526,16 +567,16 @@ export default function Home() {
   function handleSaveTps(){
     const noTps = String(formTps.noTps).padStart(2,"0");
     const wErr = validateWilayah(formTps.kecamatan, formTps.kelurahan);
-    if(wErr) return alert(wErr);
+    if(wErr){ pushToast("error", wErr); return; }
     const ll = resolveLatLng(formTps.lat, formTps.lng, formTps.kelurahan, formTps.kecamatan);
-    if("error" in ll) return alert(ll.error);
+    if("error" in ll){ pushToast("error", ll.error); return; }
     const dpt = Number(formTps.dpt), sah = Number(formTps.suaraSah), sr = Number(formTps.suaraSitiRoika), pks = Number(formTps.suaraPKS);
-    if(!(dpt>0)) return alert("DPT harus > 0");
-    if(!(sah>=0) || sah>dpt) return alert("Suara sah harus 0..DPT");
-    if(sr>sah) return alert("Suara SR tidak boleh > suara sah");
-    if(pks>sah) return alert("Suara PKS tidak boleh > suara sah");
+    if(!(dpt>0)){ pushToast("error", "DPT harus lebih dari 0."); return; }
+    if(!(sah>=0) || sah>dpt){ pushToast("error", "Suara sah harus 0 sampai DPT."); return; }
+    if(sr>sah){ pushToast("error", "Suara SR tidak boleh melebihi suara sah."); return; }
+    if(pks>sah){ pushToast("error", "Suara PKS tidak boleh melebihi suara sah."); return; }
     const dupe = tpsList.some(t=> t.id!==editingTpsId && t.noTps===noTps && t.kelurahan.toLowerCase()===formTps.kelurahan.toLowerCase());
-    if(dupe) return alert(`TPS ${noTps} duplikat di ${formTps.kelurahan}`);
+    if(dupe){ pushToast("error", `TPS ${noTps} duplikat di ${formTps.kelurahan}.`); return; }
     if(editingTpsId){
       setTpsList(prev=> prev.map(t=> t.id===editingTpsId ? {...t, noTps, kelurahan:formTps.kelurahan, kecamatan:formTps.kecamatan, lat:ll.lat, lng:ll.lng, dpt, suaraSah:sah, suaraSitiRoika:sr, suaraPKS:pks, alamatTps:formTps.alamatTps} : t));
       setImportMsg(`TPS ${noTps} ${formTps.kelurahan} diperbarui.`);
@@ -550,17 +591,21 @@ export default function Home() {
   function handleDeleteTps(id: string){
     const t = tpsList.find(x=>x.id===id);
     if(!t) return;
-    if(!confirm(`Hapus TPS ${t.noTps} ${t.kelurahan}?`)) return;
-    setTpsList(prev=> prev.filter(x=>x.id!==id));
-    setImportMsg(`TPS ${t.noTps} ${t.kelurahan} dihapus.`);
+    setPending({
+      kind: "tps", id,
+      heading: `Hapus TPS ${t.noTps}?`,
+      desc: "Data TPS dan suaranya akan dihapus permanen dari rekap dan peta.",
+      chips: [`🗳️ TPS ${t.noTps} — ${t.kelurahan}`, `📍 ${t.kecamatan} · DPT ${t.dpt} · SR ${t.suaraSitiRoika}`],
+    });
   }
-  function resetAllData(){
-    if(!confirm("Reset semua data ke bawaan (seed)? Perubahan CRUD + import akan hilang.")) return;
-    setTpsList([...TPS_SEED]);
-    setRelawans([...RELAWAN_SEED]);
-    setKoors(KOORDINATORS.map(k=>({...k, jmlRelawan: RELAWAN_SEED.filter(r=>r.koordinatorId===k.id && r.status==="aktif").length})));
-    try{ localStorage.removeItem("sr-tps"); localStorage.removeItem("sr-relawan"); localStorage.removeItem("sr-koor"); }catch{}
-    setImportMsg("Data direset ke bawaan.");
+  function askResetAllData(){
+    setPending({
+      kind: "reset",
+      heading: "Reset semua data?",
+      desc: "Seluruh perubahan CRUD dan hasil import akan hilang dan kembali ke data bawaan.",
+      chips: [`🗳️ ${tpsList.length} TPS`, `👤 ${relawans.length} relawan · 👥 ${koors.length} koordinator`],
+      confirmLabel: "Ya, Reset",
+    });
   }
 
   const donutData = [
@@ -1315,7 +1360,7 @@ export default function Home() {
                 <label className="text-[13px] bg-[#0F172A] dark:bg-white dark:text-[#0F172A] text-white rounded-full px-4 py-2 font-bold cursor-pointer shadow">Unggah Excel/CSV <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportTPS} /></label>
                 <button onClick={()=> exportCSV("data-tps.csv", filteredTps.map(t=>({no_tps:t.noTps, kelurahan:t.kelurahan, kecamatan:t.kecamatan, lat:t.lat, lng:t.lng, dpt:t.dpt, suara_sah:t.suaraSah, suara_siti_roika:t.suaraSitiRoika, suara_pks:t.suaraPKS})), ["no_tps","kelurahan","kecamatan","lat","lng","dpt","suara_sah","suara_siti_roika","suara_pks"])} className="text-[13px] bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-4 py-2 font-bold dark:text-white">Export CSV</button>
                 <button onClick={openAddTps} className="text-[13px] bg-[#2563EB] text-white rounded-full px-4 py-2 font-bold shadow">+ Tambah TPS</button>
-                <button onClick={resetAllData} title="Kembalikan ke data bawaan" className="text-[12px] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[#64748B]">Reset data</button>
+                <button onClick={askResetAllData} title="Kembalikan ke data bawaan" className="text-[12px] border border-[#E2E8F0] dark:border-[#334155] rounded-full px-3 py-2 text-[#64748B]">Reset data</button>
                 <a href="/templates/template_data_tps.csv" download className="text-[12px] underline text-[#64748B] py-2">Download template</a>
               </div>
               <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
@@ -1573,7 +1618,7 @@ export default function Home() {
               <button onClick={()=>{
                 const r = Math.floor(Number(draftTargetRelawan));
                 const k = Math.floor(Number(draftTargetKoor));
-                if(!(r>0) || !(k>0)) return alert("Target harus angka > 0");
+                if(!(r>0) || !(k>0)){ pushToast("error", "Target harus angka lebih dari 0."); return; }
                 persistTarget(r, k); setTargetRelawan(r); setTargetKoor(k); setShowTargetModal(false);
               }} className="bg-[#2563EB] text-white rounded-full px-5 py-2 text-[13px] font-bold shadow">Simpan</button>
             </div>
@@ -1582,6 +1627,18 @@ export default function Home() {
       )}
 
       <ChatBot ctx={{ stats, targetRelawan, targetKoor, progRelawan, progKoor, rekapKec, rekapKel, segCounts, topKoors: topKoors.map(k=>({ nama:k.nama, kecamatan:k.kecamatan, cnt:k.cnt })), blanks: blanks.map(b=>({ tps:{ kelurahan:b.tps.kelurahan, kecamatan:b.tps.kecamatan, dpt:b.tps.dpt, noTps:b.tps.noTps }, jarakTerdekat:b.jarakTerdekat, blank:b.blank })) }} />
+
+      {/* Elegant confirm — ganti confirm() bawaan browser */}
+      <ConfirmDialog
+        open={!!pending}
+        heading={pending?.heading ?? ""}
+        desc={pending?.desc ?? ""}
+        chips={pending?.chips ?? []}
+        confirmLabel={pending?.confirmLabel ?? "Ya, Hapus"}
+        tone={pending?.kind === "reset" ? "warning" : "danger"}
+        onConfirm={execPending}
+        onCancel={()=>setPending(null)}
+      />
 
       {/* mobile bottom nav — 44px min tap, safe-area */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 dark:bg-[#0F172A]/95 backdrop-blur border-t border-[#E2E8F0] dark:border-[#334155] z-40 safe-pb">

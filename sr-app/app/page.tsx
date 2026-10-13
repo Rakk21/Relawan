@@ -573,7 +573,7 @@ export default function Home() {
         <div className="h-[56px] flex items-center gap-2.5 px-4 border-b border-[#E2E8F0] dark:border-[#1E293B] shrink-0">
           <span className="w-9 h-9 rounded-xl bg-[#0EA5E9] grid place-items-center text-white text-[18px] shrink-0">🫂</span>
           <div className="min-w-0">
-            <div className="text-[14px] font-extrabold text-[#0F172A] dark:text-white leading-none">Relawan SR</div>
+            <div className="text-[14px] font-extrabold text-[#0F172A] dark:text-white leading-none">Relawan Siti Roika</div>
             <div className="text-[10px] text-[#64748B] font-medium">Peta, Data, Kemenangan</div>
           </div>
         </div>

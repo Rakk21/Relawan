@@ -59,3 +59,45 @@ html.dark ::-webkit-scrollbar-thumb { background: #475569; }
 /* safe-area untuk iphone notch */
 .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
 .safe-pt { padding-top: env(safe-area-inset-top); }
+
+/* ===== Elegant notification system ===== */
+@keyframes toast-in {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.96) translateX(24px); filter: blur(4px); }
+  60% { opacity: 1; transform: translateY(2px) scale(1.01) translateX(0); filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1) translateX(0); }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(-8px) scale(0.95) translateX(32px); filter: blur(4px); }
+}
+@keyframes toast-progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+@keyframes bell-ring {
+  0%, 100% { transform: rotate(0); }
+  15% { transform: rotate(14deg); }
+  30% { transform: rotate(-12deg); }
+  45% { transform: rotate(8deg); }
+  60% { transform: rotate(-6deg); }
+  75% { transform: rotate(3deg); }
+}
+@keyframes notif-pop {
+  0% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dot-ping {
+  0% { transform: scale(1); opacity: 0.9; }
+  80%, 100% { transform: scale(2.2); opacity: 0; }
+}
+.toast-enter { animation: toast-in 0.45s cubic-bezier(0.21, 1.02, 0.73, 1) both; }
+.toast-leave { animation: toast-out 0.3s ease-in both; }
+.toast-progress-bar { animation: toast-progress linear forwards; }
+.bell-ring { animation: bell-ring 0.7s ease-in-out; transform-origin: top center; }
+.notif-pop { animation: notif-pop 0.22s ease-out both; }
+.dot-ping::after {
+  content: ""; position: absolute; inset: 0; border-radius: 9999px;
+  background: #EF4444; animation: dot-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter, .toast-leave, .bell-ring, .notif-pop, .toast-progress-bar { animation: none !important; }
+}

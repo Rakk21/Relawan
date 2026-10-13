@@ -1,6 +1,6 @@
 ﻿"use client";
 import { formatNumber } from "@/lib/format";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { TabKey } from "@/components/Tabs";
 import { MapSuara, MapRelawan, MapKomparasiA, MapKomparasiB } from "@/components/Maps";
 import { TPS_SEED, RELAWAN_SEED, KOORDINATORS, KECAMATAN, KELURAHAN_BY_KEC, getKelurahanCenter, type TPS, type Relawan, type Koordinator } from "@/lib/mockData";
@@ -8,6 +8,7 @@ import { SEGMENTASI, segBySlug } from "@/lib/segmentasi";
 import { blankSpot, rekapByKecamatan, rekapByKelurahan } from "@/lib/geo";
 import { TARGET_RELAWAN_DEFAULT, TARGET_KOOR_DEFAULT, calcProgress, formatPct } from "@/lib/target";
 import ChatBot from "@/components/ChatBot";
+import { ToastStack, type Toast, type ToastKind } from "@/components/Toasts";
 
 export default function Home() {
   const [tab, setTab] = useState<TabKey>("peta");
@@ -26,6 +27,47 @@ export default function Home() {
   const [filterKoor, setFilterKoor] = useState<string>("semua");
   const [searchTps, setSearchTps] = useState("");
   const [importMsg, setImportMsg] = useState<string|null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [history, setHistory] = useState<(Toast & { time: string })[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifSeen, setNotifSeen] = useState(0);
+  const [bellShake, setBellShake] = useState(0);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const toastId = useRef(0);
+  const lastNotified = useRef<string | null>(null);
+  function pushToast(kind: ToastKind, title: string, desc?: string){
+    const id = ++toastId.current;
+    const time = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    setToasts(prev=> [...prev.slice(-3), { id, kind, title, desc }]);
+    setHistory(prev=> [{ id, kind, title, desc, time }, ...prev].slice(0, 20));
+    setBellShake(s=> s+1);
+  }
+  function dismissToast(id: number){ setToasts(prev=> prev.filter(t=> t.id!==id)); }
+  // Setiap pesan sistem (import/CRUD/reset) otomatis jadi toast elegan + masuk riwayat lonceng
+  useEffect(()=>{
+    if(!importMsg || importMsg === lastNotified.current) return;
+    lastNotified.current = importMsg;
+    const lower = importMsg.toLowerCase();
+    const kind: ToastKind = lower.includes("gagal") || lower.includes("tidak bisa")
+      ? "error"
+      : lower.includes("dihapus") || lower.includes("reset")
+        ? "warning"
+        : lower.includes("sukses") || lower.includes("ditambah") || lower.includes("diperbarui") || lower.includes("ditambahkan")
+          ? "success"
+          : "info";
+    const parts = importMsg.split(" — ");
+    pushToast(kind, parts[0].slice(0, 90), parts.slice(1).join(" — ") || undefined);
+  },[importMsg]);
+  const unread = history.length - notifSeen;
+  // tutup dropdown notif saat klik di luar
+  useEffect(()=>{
+    if(!notifOpen) return;
+    function onDoc(e: MouseEvent){
+      if(notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return ()=> document.removeEventListener("mousedown", onDoc);
+  },[notifOpen]);
   const [showTambahRelawan, setShowTambahRelawan] = useState(false);
   const [showTambahKoor, setShowTambahKoor] = useState(false);
   const [showTambahTps, setShowTambahTps] = useState(false);
@@ -688,10 +730,58 @@ export default function Home() {
             <input value={searchTop} onChange={e=>{ setSearchTop(e.target.value); setSearchRelawan(e.target.value); }} placeholder="Cari nama relawan, koordinator, wilayah, atau kata kunci..." className="w-full bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] rounded-full pl-9 pr-4 py-2 text-[13px] placeholder:text-[#94A3AF] outline-none focus:border-[#93C5FD] focus:bg-white dark:focus:bg-[#0F172A]" />
           </div>
           <div className="flex items-center gap-2 ml-auto shrink-0">
-            <button onClick={toggleTheme} title={theme==="dark"?"Light":"Dark"} className="w-8 h-8 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[13px]">{theme==="dark"?"☀️":"🌙"}</button>
-            <button className="w-8 h-8 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center relative">
-              <span className="text-[14px]">🔔</span><span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#EF4444] border-2 border-white" />
-            </button>
+            <button onClick={toggleTheme} title={theme==="dark"?"Light":"Dark"} className="w-8 h-8 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center text-[13px] transition hover:shadow">{theme==="dark"?"☀️":"🌙"}</button>
+            <div ref={notifRef} className="relative">
+              <button
+                onClick={()=>{ setNotifOpen(v=>!v); if(!notifOpen) setNotifSeen(history.length); }}
+                aria-label="Notifikasi"
+                title="Notifikasi"
+                className="w-8 h-8 rounded-full bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] grid place-items-center relative transition hover:shadow active:scale-95"
+              >
+                <span key={bellShake} className={`text-[14px] inline-block ${bellShake ? "bell-ring" : ""}`}>🔔</span>
+                {unread > 0 && (
+                  <>
+                    <span className="dot-ping absolute top-1 right-1 w-2 h-2 rounded-full" />
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#EF4444] border-2 border-white" />
+                  </>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="notif-pop absolute right-0 top-[42px] z-[75] w-[min(340px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-[#E2E8F0] dark:border-[#334155] bg-white/95 dark:bg-[#0F172A]/95 shadow-[0_20px_60px_rgba(15,23,42,0.22)] backdrop-blur-xl">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-[#E2E8F0] dark:border-[#334155]">
+                    <div>
+                      <div className="text-[13px] font-extrabold text-[#0F172A] dark:text-white leading-none">Notifikasi</div>
+                      <div className="text-[11px] text-[#64748B] mt-0.5">{unread > 0 ? `${unread} belum dibaca` : "Semua sudah dibaca"}</div>
+                    </div>
+                    {history.length > 0 && (
+                      <button onClick={()=>{ setHistory([]); setNotifSeen(0); }} className="text-[11px] font-bold text-[#64748B] hover:text-[#DC2626]">Hapus semua</button>
+                    )}
+                  </div>
+                  <div className="max-h-[320px] overflow-auto p-2 space-y-1">
+                    {history.length === 0 && (
+                      <div className="py-8 text-center">
+                        <div className="text-[28px]">🕊️</div>
+                        <div className="text-[12px] font-bold text-[#0F172A] dark:text-white mt-1">Belum ada notifikasi</div>
+                        <div className="text-[11px] text-[#94A3AF]">Tambah / edit / import data untuk memicu notifikasi.</div>
+                      </div>
+                    )}
+                    {history.map((h, i)=>(
+                      <div key={h.id} className={`flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition hover:bg-slate-50 dark:hover:bg-white/5 ${i < unread ? "bg-[#EFF6FF]/70 dark:bg-white/5" : ""}`}>
+                        <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-black text-white ${h.kind==="success" ? "bg-emerald-500" : h.kind==="error" ? "bg-rose-500" : h.kind==="warning" ? "bg-amber-500" : "bg-blue-500"}`}>
+                          {h.kind==="success" ? "✓" : h.kind==="error" ? "!" : h.kind==="warning" ? "◐" : "✦"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] font-bold text-[#0F172A] dark:text-white leading-tight">{h.title}</div>
+                          {h.desc && <div className="text-[11px] text-[#64748B] dark:text-[#94A3B8] leading-snug line-clamp-2">{h.desc}</div>}
+                          <div className="text-[10px] text-[#94A3AF] mt-0.5">{h.time} WIB</div>
+                        </div>
+                        {i < unread && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2563EB]" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="hidden sm:flex items-center gap-2 pl-2">
               <img src="https://i.pravatar.cc/100?img=12" alt="admin" className="w-8 h-8 rounded-full object-cover border border-[#E2E8F0]" />
               <div className="hidden lg:block leading-tight">
@@ -704,8 +794,7 @@ export default function Home() {
         </header>
 
         <main className="flex-1 bg-[#F1F5F9] dark:bg-[#020617] p-3 sm:p-4 space-y-4 overflow-auto pb-[calc(72px+env(safe-area-inset-bottom))] lg:pb-4">
-          {/* banner import */}
-          {importMsg && <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-[13px] rounded-xl px-4 py-2.5">{importMsg}</div>}
+          <ToastStack toasts={toasts} dismiss={dismissToast} />
 
           {/* DASHBOARD CONTENT */}
           {tab==="peta" && (
